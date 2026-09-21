@@ -1,12 +1,14 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { fileURLToPath } from 'node:url';
+import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { z, ZodError } from 'zod';
 import { AccessError, scoped } from './context.js';
 import { createAppointment, listAppointments } from './appointments.js';
 import { createCareRecord, createPatient, listCareRecords, listPatients, readPatient } from './patients.js';
 import { createPaymentRecord, listPayments } from './payments.js';
 import type { TokenVerifier } from './auth.js';
-import { verifyStaffToken } from './auth.js';
-import type { TenantConfig, TenantPoolRegistry, TenantRegistry } from './tenant-registry.js';
+import { staffVerifier, verifyStaffToken } from './auth.js';
+import { productionRegistry, TenantPoolRegistry, type TenantConfig, type TenantRegistry } from './tenant-registry.js';
 
 const requestScope=z.object({organizationId:z.string().uuid(),locationId:z.string().uuid()});
 interface Platform { registry:TenantRegistry; pools:TenantPoolRegistry; verifierFor(tenant:TenantConfig):TokenVerifier; }
@@ -73,4 +75,16 @@ export function createHealthcareServer(platform:Platform):Server {
       return send(response,503,{error:'Service unavailable'});
     }
   });
+}
+
+if(process.argv[1] && fileURLToPath(import.meta.url)===process.argv[1]) {
+  const port=Number.parseInt(process.env.PORT??'3000',10);
+  if(!Number.isInteger(port) || port<1 || port>65_535) throw new Error('PORT must be a valid TCP port');
+  const secrets=new SecretsManagerClient({});
+  const pools=new TenantPoolRegistry(secrets);
+  const server=createHealthcareServer({registry:productionRegistry(),pools,verifierFor:tenant=>staffVerifier({userPoolId:tenant.staffUserPoolId,clientId:tenant.staffClientId})});
+  server.listen(port,'0.0.0.0',()=>console.info(`Kantage Healthcare API listening on ${port}`));
+  const stop=()=>server.close(()=>pools.close().finally(()=>process.exit(0)));
+  process.once('SIGTERM',stop);
+  process.once('SIGINT',stop);
 }
