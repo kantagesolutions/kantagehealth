@@ -5,6 +5,8 @@ import { Client, Pool } from 'pg';
 import { AccessError, scoped } from '../src/context.js';
 import { createAppointment, listAppointments } from '../src/appointments.js';
 import { createCareRecord, createPatient, listCareRecords, listPatients } from '../src/patients.js';
+import { createPaymentRecord } from '../src/payments.js';
+import { approveMySupportAccess, requestSupportAccess } from '../src/support.js';
 
 const connectionString=process.env.TEST_DATABASE_URL ?? 'postgresql://venuscollective@127.0.0.1:55439/kantage_healthcare_test';
 const run=`${randomUUID().slice(0,8)}`;
@@ -88,4 +90,21 @@ test('a front-desk user cannot read clinical records',async()=>{
     scoped(appPool,{...scopeA,sub:frontDeskSub},()=>listCareRecords(randomUUID())),
     (error:unknown)=>error instanceof AccessError && error.status===403,
   );
+});
+
+test('support receives temporary operational access only through an audited session',async()=>{
+  const root=new Client({connectionString});
+  const supportUserId=randomUUID(), supportSub=`support-${run}`;
+  await root.connect();
+  try {
+    await root.query('INSERT INTO clinical.users(id,organization_id,cognito_sub,email,name,status) VALUES($1,$2,$3,$4,$5,$6)',[supportUserId,orgA,supportSub,`${supportSub}@example.test`,'Kantage Support','active']);
+    await root.query('INSERT INTO clinical.user_roles(organization_id,user_id,role,location_id) VALUES($1,$2,$3,$4)',[orgA,supportUserId,'kantage_support',locationA]);
+    await root.query('INSERT INTO clinical.user_capabilities(organization_id,user_id,capability_key) VALUES($1,$2,$3)',[orgA,userA,'organization.manage']);
+  } finally { await root.end(); }
+  const patient=await scoped(appPool,scopeA,()=>createPatient({firstName:'Morgan',lastName:'Example',phone:'410-555-0111'}));
+  const requested=await scoped(appPool,scopeA,()=>requestSupportAccess({supportUserSub:supportSub,reason:'Investigate a clinic billing configuration issue.',expiresInMinutes:30}));
+  const supportScope={...scopeA,sub:supportSub};
+  await scoped(appPool,supportScope,()=>approveMySupportAccess(requested.id));
+  const payment=await scoped(appPool,supportScope,()=>createPaymentRecord({patientId:patient.id,amountCents:1000,description:'Synthetic support test'}));
+  assert.ok(payment.id);
 });

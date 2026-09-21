@@ -6,6 +6,7 @@ import { AccessError, scoped } from './context.js';
 import { createAppointment, listAppointments } from './appointments.js';
 import { createCareRecord, createPatient, listCareRecords, listPatients, readPatient } from './patients.js';
 import { createPaymentRecord, listPayments } from './payments.js';
+import { approveMySupportAccess, listSupportAccess, requestSupportAccess } from './support.js';
 import type { TokenVerifier } from './auth.js';
 import { staffVerifier, verifyStaffToken } from './auth.js';
 import { productionRegistry, TenantPoolRegistry, type TenantConfig, type TenantRegistry } from './tenant-registry.js';
@@ -56,6 +57,13 @@ export function createHealthcareServer(platform:Platform):Server {
         const payload=await body(request);
         return send(response,201,{payment:await scoped(pool,requestScopeData,()=>createPaymentRecord(payload))});
       }
+      if(request.method==='GET' && path==='/v1/support-access') return send(response,200,{sessions:await scoped(pool,requestScopeData,listSupportAccess)});
+      if(request.method==='POST' && path==='/v1/support-access') {
+        const payload=await body(request);
+        return send(response,201,{session:await scoped(pool,requestScopeData,()=>requestSupportAccess(payload))});
+      }
+      const supportMatch=path.match(/^\/v1\/support-access\/([0-9a-f-]{36})\/approve$/i);
+      if(supportMatch?.[1] && request.method==='POST') return send(response,200,{session:await scoped(pool,requestScopeData,()=>approveMySupportAccess(supportMatch[1]!))});
       if(request.method==='POST' && path==='/v1/patients') {
         const payload=await body(request);
         return send(response,201,{patient:await scoped(pool,requestScopeData,()=>createPatient(payload))});
