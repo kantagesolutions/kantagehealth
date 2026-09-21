@@ -1,7 +1,9 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { z, ZodError } from 'zod';
 import { AccessError, scoped } from './context.js';
+import { createAppointment, listAppointments } from './appointments.js';
 import { createCareRecord, createPatient, listCareRecords, listPatients, readPatient } from './patients.js';
+import { createPaymentRecord, listPayments } from './payments.js';
 import type { TokenVerifier } from './auth.js';
 import { verifyStaffToken } from './auth.js';
 import type { TenantConfig, TenantPoolRegistry, TenantRegistry } from './tenant-registry.js';
@@ -42,6 +44,16 @@ export function createHealthcareServer(platform:Platform):Server {
       const requestScopeData={...scope,sub:claims.sub,ip:remoteIp(request),userAgent:String(request.headers['user-agent']??'').slice(0,256)};
       const path=(request.url??'/').split('?')[0] ?? '/';
       if(request.method==='GET' && path==='/v1/patients') return send(response,200,{patients:await scoped(pool,requestScopeData,listPatients)});
+      if(request.method==='GET' && path==='/v1/appointments') return send(response,200,{appointments:await scoped(pool,requestScopeData,listAppointments)});
+      if(request.method==='POST' && path==='/v1/appointments') {
+        const payload=await body(request);
+        return send(response,201,{appointment:await scoped(pool,requestScopeData,()=>createAppointment(payload))});
+      }
+      if(request.method==='GET' && path==='/v1/payments') return send(response,200,{payments:await scoped(pool,requestScopeData,listPayments)});
+      if(request.method==='POST' && path==='/v1/payments') {
+        const payload=await body(request);
+        return send(response,201,{payment:await scoped(pool,requestScopeData,()=>createPaymentRecord(payload))});
+      }
       if(request.method==='POST' && path==='/v1/patients') {
         const payload=await body(request);
         return send(response,201,{patient:await scoped(pool,requestScopeData,()=>createPatient(payload))});

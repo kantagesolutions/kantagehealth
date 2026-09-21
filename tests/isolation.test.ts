@@ -3,6 +3,7 @@ import test, { before, after } from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { Client, Pool } from 'pg';
 import { AccessError, scoped } from '../src/context.js';
+import { createAppointment, listAppointments } from '../src/appointments.js';
 import { createCareRecord, createPatient, listCareRecords, listPatients } from '../src/patients.js';
 
 const connectionString=process.env.TEST_DATABASE_URL ?? 'postgresql://venuscollective@127.0.0.1:55439/kantage_healthcare_test';
@@ -64,6 +65,15 @@ test('clinical records require a clinician and generate an immutable audit entry
     }),
     /permission denied/i,
   );
+});
+
+test('appointments stay within the current organization and location',async()=>{
+  const patient=await scoped(appPool,scopeA,()=>createPatient({firstName:'Casey',lastName:'Example',phone:'410-555-0103'}));
+  const appointment=await scoped(appPool,scopeA,()=>createAppointment({patientId:patient.id,providerUserId:userA,service:'Exam',startTime:'2030-01-02T15:00:00.000Z',durationMinutes:30}));
+  const aAppointments=await scoped(appPool,scopeA,listAppointments);
+  const bAppointments=await scoped(appPool,scopeB,listAppointments);
+  assert.equal(aAppointments.some(row=>row.id===appointment.id),true);
+  assert.equal(bAppointments.some(row=>row.id===appointment.id),false);
 });
 
 test('a front-desk user cannot read clinical records',async()=>{
