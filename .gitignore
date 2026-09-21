@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env*
+!.env.example
+*.tsbuildinfo
+.terraform/
+*.tfstate*
+*.tfplan
+*.auto.tfvars

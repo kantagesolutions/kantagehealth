@@ -1,0 +1,6 @@
+region              = "us-east-1"
+environment         = "production"
+expected_account_id = "REPLACE_WITH_DEDICATED_HEALTHCARE_ACCOUNT_ID"
+audit_retention_years = 7
+# This must remain false until an authorized Kantage representative has accepted the AWS BAA in Artifact for this exact account.
+baa_attested = false
