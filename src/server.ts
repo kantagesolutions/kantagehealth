@@ -10,6 +10,7 @@ import { approveMySupportAccess, listSupportAccess, requestSupportAccess } from 
 import type { TokenVerifier } from './auth.js';
 import { staffVerifier, verifyStaffToken } from './auth.js';
 import { productionRegistry, TenantPoolRegistry, type TenantConfig, type TenantRegistry } from './tenant-registry.js';
+import { createPublicBookingInquiry } from './public-booking.js';
 
 const requestScope=z.object({organizationId:z.string().uuid(),locationId:z.string().uuid()});
 interface Platform { registry:TenantRegistry; pools:TenantPoolRegistry; verifierFor(tenant:TenantConfig):TokenVerifier; }
@@ -34,18 +35,35 @@ async function body(request:IncomingMessage):Promise<unknown>{
   catch { throw new AccessError(400,'Invalid JSON'); }
 }
 function remoteIp(request:IncomingMessage){ return request.socket.remoteAddress?.slice(0,64); }
+const bookingAttempts=new Map<string,{count:number;expiresAt:number}>();
+function allowBooking(ip:string,key:string){ const now=Date.now(), id=`${ip}:${key}`, current=bookingAttempts.get(id); if(!current || current.expiresAt<=now) { bookingAttempts.set(id,{count:1,expiresAt:now+60*60*1000}); return true; } if(current.count>=8) return false; current.count+=1; return true; }
 
 export function createHealthcareServer(platform:Platform):Server {
   return createServer(async(request,response)=>{
     try {
       if(request.method==='GET' && request.url==='/healthz') return send(response,200,{status:'ok'});
+      const path=(request.url??'/').split('?')[0] ?? '/';
+      const publicBookingMatch=path.match(/^\/v1\/public\/booking\/([A-Za-z0-9_-]{20,128})(?:\/inquiries)?$/);
+      if(publicBookingMatch?.[1]) {
+        const resolved=await platform.registry.findBooking(publicBookingMatch[1]);
+        if(!resolved) return send(response,404,{error:'Booking destination not found'});
+        const target={organizationId:resolved.tenant.organizationId,locationId:resolved.clinic.locationId,clinicName:resolved.clinic.clinicName,timezone:resolved.clinic.timezone};
+        if(request.method==='GET' && !path.endsWith('/inquiries')) return send(response,200,{clinic:{name:target.clinicName,timezone:target.timezone}});
+        if(request.method==='POST' && path.endsWith('/inquiries')) {
+          const ip=remoteIp(request)??'unknown';
+          if(!allowBooking(ip,publicBookingMatch[1])) return send(response,429,{error:'Please try again later'});
+          const pool=await platform.pools.get(resolved.tenant);
+          const inquiry=await createPublicBookingInquiry(pool,target,await body(request),{ip:remoteIp(request),userAgent:String(request.headers['user-agent']??'')});
+          return send(response,201,{inquiry});
+        }
+        return send(response,405,{error:'Method not allowed'});
+      }
       const scope=requestScope.parse({organizationId:request.headers['x-kantage-organization'],locationId:request.headers['x-kantage-location']});
       const bearer=token(request);
       const tenant=await platform.registry.get(scope.organizationId);
       const claims=await verifyStaffToken(bearer,{userPoolId:tenant.staffUserPoolId,clientId:tenant.staffClientId},platform.verifierFor(tenant));
       const pool=await platform.pools.get(tenant);
       const requestScopeData={...scope,sub:claims.sub,ip:remoteIp(request),userAgent:String(request.headers['user-agent']??'').slice(0,256)};
-      const path=(request.url??'/').split('?')[0] ?? '/';
       if(request.method==='GET' && path==='/v1/patients') return send(response,200,{patients:await scoped(pool,requestScopeData,listPatients)});
       if(request.method==='GET' && path==='/v1/appointments') return send(response,200,{appointments:await scoped(pool,requestScopeData,listAppointments)});
       if(request.method==='POST' && path==='/v1/appointments') {

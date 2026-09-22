@@ -3,13 +3,20 @@ import { Pool } from 'pg';
 import { z } from 'zod';
 
 const databaseSecret=z.object({host:z.string().min(1),port:z.number().int().positive().default(5432),database:z.string().min(1),username:z.string().min(1),password:z.string().min(1),sslRootCert:z.string().min(1)}).strict();
-const tenantEntry=z.object({organizationId:z.string().uuid(),databaseSecretArn:z.string().min(1),documentsBucket:z.string().min(3),staffUserPoolId:z.string().min(1),staffClientId:z.string().min(1)}).strict();
+const bookingClinic=z.object({key:z.string().regex(/^[A-Za-z0-9_-]{20,128}$/),locationId:z.string().uuid(),clinicName:z.string().trim().min(1).max(160),timezone:z.string().trim().min(1).max(100)}).strict();
+const tenantEntry=z.object({organizationId:z.string().uuid(),databaseSecretArn:z.string().min(1),documentsBucket:z.string().min(3),staffUserPoolId:z.string().min(1),staffClientId:z.string().min(1),bookingClinics:z.array(bookingClinic).default([])}).strict();
 const registrySchema=z.object({tenants:z.array(tenantEntry)}).strict();
 export type TenantConfig=z.infer<typeof tenantEntry>;
+export type BookingClinic=z.infer<typeof bookingClinic>;
 
 export class TenantRegistry {
   #cache?:Promise<Map<string,TenantConfig>>;
   constructor(private readonly client:Pick<SecretsManagerClient,'send'>,private readonly registrySecretId:string) {}
+  async findBooking(key:string):Promise<{tenant:TenantConfig; clinic:BookingClinic}|undefined> {
+    const tenants=await (this.#cache ??= this.load());
+    for(const tenant of tenants.values()) { const clinic=tenant.bookingClinics.find(item=>item.key===key); if(clinic) return {tenant,clinic}; }
+    return undefined;
+  }
   async get(organizationId:string):Promise<TenantConfig> {
     const tenants=await (this.#cache ??= this.load());
     const tenant=tenants.get(organizationId);
