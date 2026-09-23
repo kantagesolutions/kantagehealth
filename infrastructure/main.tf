@@ -43,16 +43,24 @@ variable "audit_retention_years" {
 }
 variable "api_image_uri" {
   type        = string
+  default     = null
   description = "Immutable ECR image URI for the Kantage Healthcare API."
 }
 variable "tenant_registry_secret_arn" {
   type        = string
+  default     = null
   sensitive   = true
   description = "Secrets Manager ARN containing the tenant registry used by the API."
 }
 variable "api_certificate_arn" {
   type        = string
+  default     = null
   description = "ACM certificate ARN for the HTTPS API hostname."
+}
+variable "enable_api_service" {
+  type        = bool
+  default     = false
+  description = "Creates NAT, public load balancer, and ECS tasks only after an immutable image, tenant secret, and ACM certificate are ready."
 }
 variable "api_desired_count" {
   type    = number
@@ -83,6 +91,17 @@ resource "terraform_data" "compliance_gate" {
     precondition {
       condition     = var.baa_attested
       error_message = "Refusing to create PHI-capable resources until the AWS BAA is accepted and attested."
+    }
+  }
+}
+
+resource "terraform_data" "api_deployment_gate" {
+  count = var.enable_api_service ? 1 : 0
+  input = local.name
+  lifecycle {
+    precondition {
+      condition     = var.api_image_uri != null && var.tenant_registry_secret_arn != null && var.api_certificate_arn != null
+      error_message = "Enable the API only with an immutable image URI, tenant registry secret ARN, and issued ACM certificate ARN."
     }
   }
 }
@@ -247,22 +266,26 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 resource "aws_eip" "nat" {
+  count  = var.enable_api_service ? 1 : 0
   domain = "vpc"
   tags   = merge(local.tags, { Name = "${local.name}-nat" })
 }
 resource "aws_nat_gateway" "main" {
-  allocation_id = aws_eip.nat.id
+  count         = var.enable_api_service ? 1 : 0
+  allocation_id = aws_eip.nat[0].id
   subnet_id     = aws_subnet.public[0].id
   depends_on    = [aws_internet_gateway.main]
   tags          = merge(local.tags, { Name = "${local.name}-nat" })
 }
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.main.id
-  }
   tags = merge(local.tags, { Name = "${local.name}-private" })
+}
+resource "aws_route" "private_internet" {
+  count                  = var.enable_api_service ? 1 : 0
+  route_table_id         = aws_route_table.private.id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.main[0].id
 }
 resource "aws_route_table_association" "private" {
   count          = 2
@@ -270,6 +293,7 @@ resource "aws_route_table_association" "private" {
   route_table_id = aws_route_table.private.id
 }
 resource "aws_security_group" "load_balancer" {
+  count       = var.enable_api_service ? 1 : 0
   name_prefix = "${local.name}-alb-"
   vpc_id      = aws_vpc.main.id
   ingress {
@@ -298,12 +322,15 @@ resource "aws_security_group" "load_balancer" {
 resource "aws_security_group" "service" {
   name_prefix = "${local.name}-service-"
   vpc_id      = aws_vpc.main.id
-  ingress {
-    from_port       = 3000
-    to_port         = 3000
-    protocol        = "tcp"
-    security_groups = [aws_security_group.load_balancer.id]
-    description     = "HTTPS load balancer only"
+  dynamic "ingress" {
+    for_each = var.enable_api_service ? [1] : []
+    content {
+      from_port       = 3000
+      to_port         = 3000
+      protocol        = "tcp"
+      security_groups = [aws_security_group.load_balancer[0].id]
+      description     = "HTTPS load balancer only"
+    }
   }
   egress {
     from_port   = 443
@@ -371,10 +398,12 @@ resource "aws_iam_role" "api_task" {
 data "aws_iam_policy_document" "api_task" {
   statement {
     actions = ["secretsmanager:GetSecretValue"]
-    resources = [
-      var.tenant_registry_secret_arn,
+    resources = concat(
+      var.tenant_registry_secret_arn == null ? [] : [var.tenant_registry_secret_arn],
+      [
       "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:${local.name}-*"
-    ]
+      ]
+    )
   }
   statement {
     actions   = ["kms:Decrypt"]
@@ -391,16 +420,18 @@ resource "aws_iam_role_policy" "api_task" {
   policy = data.aws_iam_policy_document.api_task.json
 }
 resource "aws_lb" "api" {
+  count                      = var.enable_api_service ? 1 : 0
   name                       = "${local.name}-api"
   internal                   = false
   load_balancer_type         = "application"
-  security_groups            = [aws_security_group.load_balancer.id]
+  security_groups            = [aws_security_group.load_balancer[0].id]
   subnets                    = aws_subnet.public[*].id
   drop_invalid_header_fields = true
   enable_deletion_protection = true
   tags                       = local.tags
 }
 resource "aws_lb_target_group" "api" {
+  count       = var.enable_api_service ? 1 : 0
   name_prefix = "khapi-"
   port        = 3000
   protocol    = "HTTP"
@@ -418,7 +449,8 @@ resource "aws_lb_target_group" "api" {
   tags = local.tags
 }
 resource "aws_lb_listener" "http" {
-  load_balancer_arn = aws_lb.api.arn
+  count             = var.enable_api_service ? 1 : 0
+  load_balancer_arn = aws_lb.api[0].arn
   port              = 80
   protocol          = "HTTP"
   default_action {
@@ -431,17 +463,19 @@ resource "aws_lb_listener" "http" {
   }
 }
 resource "aws_lb_listener" "https" {
-  load_balancer_arn = aws_lb.api.arn
+  count             = var.enable_api_service ? 1 : 0
+  load_balancer_arn = aws_lb.api[0].arn
   port              = 443
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
   certificate_arn   = var.api_certificate_arn
   default_action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.api.arn
+    target_group_arn = aws_lb_target_group.api[0].arn
   }
 }
 resource "aws_ecs_task_definition" "api" {
+  count                    = var.enable_api_service ? 1 : 0
   family                   = "${local.name}-api"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
@@ -466,9 +500,10 @@ resource "aws_ecs_task_definition" "api" {
   tags = local.tags
 }
 resource "aws_ecs_service" "api" {
+  count                              = var.enable_api_service ? 1 : 0
   name                               = "${local.name}-api"
   cluster                            = aws_ecs_cluster.api.id
-  task_definition                    = aws_ecs_task_definition.api.arn
+  task_definition                    = aws_ecs_task_definition.api[0].arn
   desired_count                      = var.api_desired_count
   launch_type                        = "FARGATE"
   health_check_grace_period_seconds  = 60
@@ -480,11 +515,11 @@ resource "aws_ecs_service" "api" {
     assign_public_ip = false
   }
   load_balancer {
-    target_group_arn = aws_lb_target_group.api.arn
+    target_group_arn = aws_lb_target_group.api[0].arn
     container_name   = "api"
     container_port   = 3000
   }
-  depends_on = [aws_lb_listener.https]
+  depends_on = [aws_lb_listener.https, terraform_data.api_deployment_gate]
   tags       = local.tags
 }
 resource "aws_security_group" "database" {
@@ -596,4 +631,4 @@ output "rds_master_secret_arn" {
 }
 output "api_ecr_repository_url" { value = aws_ecr_repository.api.repository_url }
 output "api_cluster_name" { value = aws_ecs_cluster.api.name }
-output "api_load_balancer_dns_name" { value = aws_lb.api.dns_name }
+output "api_load_balancer_dns_name" { value = try(aws_lb.api[0].dns_name, null) }

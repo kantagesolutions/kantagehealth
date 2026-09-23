@@ -5,5 +5,6 @@ audit_retention_years = 7
 api_image_uri = "REPLACE_WITH_IMMUTABLE_ECR_IMAGE_URI"
 tenant_registry_secret_arn = "REPLACE_WITH_TENANT_REGISTRY_SECRET_ARN"
 api_certificate_arn = "REPLACE_WITH_ISSUED_ACM_CERTIFICATE_ARN"
+enable_api_service = false
 # This must remain false until an authorized Kantage representative has accepted the AWS BAA in Artifact for this exact account.
 baa_attested = false
