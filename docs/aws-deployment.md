@@ -24,6 +24,8 @@ The Kantage Health API is defined as an encrypted, private Fargate service behin
 
 Copy `infrastructure/terraform.tfvars.example` to a local `terraform.tfvars`; it is intentionally ignored by Git. Populate actual values only in the dedicated account.
 
+Run `infrastructure/bootstrap-state-backend.sh` first in the dedicated account. It creates the encrypted, versioned, private S3 backend that holds Terraform state. Then initialize Terraform with the bucket, `production/healthcare.tfstate` key, and `us-east-1` region printed by the script.
+
 Stage 1 keeps `enable_api_service = false`. It creates the encrypted database, storage, immutable audit trail, VPC, ECR repository, logging, and identity foundation without incurring Application Load Balancer or NAT Gateway charges and without exposing an API.
 
 For Stage 2, set `enable_api_service = true` only after the ACM certificate, immutable ECR image URI, and tenant registry secret ARN are real. Run `terraform plan` before each stage, review the AWS cost and resource list, and only then run `terraform apply`.
