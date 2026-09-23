@@ -119,7 +119,7 @@ resource "aws_kms_alias" "data" {
 }
 
 resource "aws_s3_bucket" "documents" {
-  bucket_prefix = "${local.name}-documents-"
+  bucket_prefix = "kh-${var.environment}-docs-"
   force_destroy = false
   tags          = local.tags
   depends_on    = [terraform_data.compliance_gate]
@@ -149,7 +149,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "documents" {
 }
 
 resource "aws_s3_bucket" "audit" {
-  bucket_prefix       = "${local.name}-audit-"
+  bucket_prefix       = "kh-${var.environment}-audit-"
   object_lock_enabled = true
   force_destroy       = false
   tags                = merge(local.tags, { Purpose = "Immutable audit exports" })
