@@ -107,10 +107,35 @@ resource "terraform_data" "api_deployment_gate" {
   }
 }
 
+data "aws_iam_policy_document" "data_key" {
+  statement {
+    sid       = "EnableAccountAdministration"
+    effect    = "Allow"
+    principals { type = "AWS" identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"] }
+    actions   = ["kms:*"]
+    resources = ["*"]
+  }
+  statement {
+    sid       = "AllowCloudTrailEncryption"
+    effect    = "Allow"
+    principals { type = "Service" identifiers = ["cloudtrail.amazonaws.com"] }
+    actions   = ["kms:GenerateDataKey*", "kms:DescribeKey"]
+    resources = ["*"]
+  }
+  statement {
+    sid       = "AllowCloudWatchLogsEncryption"
+    effect    = "Allow"
+    principals { type = "Service" identifiers = ["logs.${var.region}.amazonaws.com"] }
+    actions   = ["kms:Encrypt*", "kms:Decrypt*", "kms:ReEncrypt*", "kms:GenerateDataKey*", "kms:Describe*"]
+    resources = ["*"]
+  }
+}
+
 resource "aws_kms_key" "data" {
   description             = "Kantage Healthcare PHI encryption"
   enable_key_rotation     = true
   deletion_window_in_days = 30
+  policy                  = data.aws_iam_policy_document.data_key.json
   tags                    = local.tags
 }
 resource "aws_kms_alias" "data" {
