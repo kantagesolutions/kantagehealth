@@ -425,6 +425,28 @@ resource "aws_iam_role_policy_attachment" "api_execution" {
   role       = aws_iam_role.api_execution.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
+
+# ECS uses the execution role to inject the registry secret into the task.
+# Limit it to this one encrypted registry; runtime access remains on the task role.
+data "aws_iam_policy_document" "api_execution_registry" {
+  count = var.enable_api_service ? 1 : 0
+
+  statement {
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [var.tenant_registry_secret_arn]
+  }
+
+  statement {
+    actions   = ["kms:Decrypt"]
+    resources = [aws_kms_key.data.arn]
+  }
+}
+resource "aws_iam_role_policy" "api_execution_registry" {
+  count  = var.enable_api_service ? 1 : 0
+  name   = "${local.name}-api-registry"
+  role   = aws_iam_role.api_execution.id
+  policy = data.aws_iam_policy_document.api_execution_registry[0].json
+}
 resource "aws_iam_role" "api_task" {
   name               = "${local.name}-api-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
