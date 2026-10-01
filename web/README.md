@@ -1,4 +1,4 @@
-# Kantage Healthcare portal
+# Kantage Healthcare Staff Portal
 
 This is the staff operations portal for the Kantage Healthcare platform. It is deliberately separate from the clinical API so the browser only receives the user interface; clinical data remains behind authenticated API routes.
 
