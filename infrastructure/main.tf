@@ -109,8 +109,8 @@ resource "terraform_data" "api_deployment_gate" {
 
 data "aws_iam_policy_document" "data_key" {
   statement {
-    sid       = "EnableAccountAdministration"
-    effect    = "Allow"
+    sid    = "EnableAccountAdministration"
+    effect = "Allow"
     principals {
       type        = "AWS"
       identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
@@ -119,8 +119,8 @@ data "aws_iam_policy_document" "data_key" {
     resources = ["*"]
   }
   statement {
-    sid       = "AllowCloudTrailEncryption"
-    effect    = "Allow"
+    sid    = "AllowCloudTrailEncryption"
+    effect = "Allow"
     principals {
       type        = "Service"
       identifiers = ["cloudtrail.amazonaws.com"]
@@ -129,8 +129,8 @@ data "aws_iam_policy_document" "data_key" {
     resources = ["*"]
   }
   statement {
-    sid       = "AllowCloudWatchLogsEncryption"
-    effect    = "Allow"
+    sid    = "AllowCloudWatchLogsEncryption"
+    effect = "Allow"
     principals {
       type        = "Service"
       identifiers = ["logs.${var.region}.amazonaws.com"]
@@ -314,7 +314,7 @@ resource "aws_nat_gateway" "main" {
 }
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
-  tags = merge(local.tags, { Name = "${local.name}-private" })
+  tags   = merge(local.tags, { Name = "${local.name}-private" })
 }
 resource "aws_route" "private_internet" {
   count                  = var.enable_api_service ? 1 : 0
@@ -436,7 +436,7 @@ data "aws_iam_policy_document" "api_task" {
     resources = concat(
       var.tenant_registry_secret_arn == null ? [] : [var.tenant_registry_secret_arn],
       [
-      "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:${local.name}-*"
+        "arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:${local.name}-*"
       ]
     )
   }
@@ -455,8 +455,9 @@ resource "aws_iam_role_policy" "api_task" {
   policy = data.aws_iam_policy_document.api_task.json
 }
 resource "aws_lb" "api" {
-  count                      = var.enable_api_service ? 1 : 0
-  name                       = "${local.name}-api"
+  count = var.enable_api_service ? 1 : 0
+  # AWS Application Load Balancer names are limited to 32 characters.
+  name                       = "kh-${var.environment}-api"
   internal                   = false
   load_balancer_type         = "application"
   security_groups            = [aws_security_group.load_balancer[0].id]
