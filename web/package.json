@@ -14,8 +14,5 @@
     "react": "latest",
     "react-dom": "latest",
     "vite": "latest"
-  },
-  "devDependencies": {
-    "@rolldown/binding-darwin-arm64": "^1.2.9"
   }
 }
