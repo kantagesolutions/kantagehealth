@@ -72,6 +72,22 @@ variable "api_desired_count" {
   }
 }
 
+variable "staff_portal_image_uri" {
+  type        = string
+  default     = null
+  description = "Immutable ECR image URI for the Kantage Health Staff Portal."
+}
+variable "enable_staff_portal" {
+  type        = bool
+  default     = false
+  description = "Creates the Staff Portal ECS service and HTTPS host route after an immutable image is available."
+}
+variable "staff_portal_hostname" {
+  type        = string
+  default     = "portal.health.kantage.solutions"
+  description = "Public hostname for the authenticated Kantage Health Staff Portal."
+}
+
 locals {
   name = "kantage-healthcare-${var.environment}"
   tags = {
@@ -103,6 +119,17 @@ resource "terraform_data" "api_deployment_gate" {
     precondition {
       condition     = var.api_image_uri != null && var.tenant_registry_secret_arn != null && var.api_certificate_arn != null
       error_message = "Enable the API only with an immutable image URI, tenant registry secret ARN, and issued ACM certificate ARN."
+    }
+  }
+}
+
+resource "terraform_data" "staff_portal_deployment_gate" {
+  count = var.enable_staff_portal ? 1 : 0
+  input = local.name
+  lifecycle {
+    precondition {
+      condition     = var.enable_api_service && var.staff_portal_image_uri != null && var.api_certificate_arn != null
+      error_message = "Enable the Staff Portal only after the API, an immutable portal image, and an issued ACM certificate are ready."
     }
   }
 }
@@ -580,6 +607,133 @@ resource "aws_ecs_service" "api" {
   depends_on = [aws_lb_listener.https, terraform_data.api_deployment_gate]
   tags       = local.tags
 }
+resource "aws_ecr_repository" "staff_portal" {
+  count                = var.enable_staff_portal ? 1 : 0
+  name                 = "${local.name}-staff-portal"
+  image_tag_mutability = "IMMUTABLE"
+  image_scanning_configuration { scan_on_push = true }
+  encryption_configuration {
+    encryption_type = "KMS"
+    kms_key         = aws_kms_key.data.arn
+  }
+  tags = local.tags
+}
+resource "aws_cloudwatch_log_group" "staff_portal" {
+  count             = var.enable_staff_portal ? 1 : 0
+  name              = "/kantage-healthcare/${var.environment}/staff-portal"
+  retention_in_days = 365
+  kms_key_id        = aws_kms_key.data.arn
+  tags              = local.tags
+}
+resource "aws_iam_role" "staff_portal_execution" {
+  count              = var.enable_staff_portal ? 1 : 0
+  name               = "${local.name}-staff-portal-execution"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+  tags               = local.tags
+}
+resource "aws_iam_role_policy_attachment" "staff_portal_execution" {
+  count      = var.enable_staff_portal ? 1 : 0
+  role       = aws_iam_role.staff_portal_execution[0].name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+resource "aws_security_group" "staff_portal_service" {
+  count       = var.enable_staff_portal ? 1 : 0
+  name_prefix = "${local.name}-staff-portal-"
+  vpc_id      = aws_vpc.main.id
+  ingress {
+    from_port       = 8080
+    to_port         = 8080
+    protocol        = "tcp"
+    security_groups = [aws_security_group.load_balancer[0].id]
+    description     = "HTTPS load balancer only"
+  }
+  egress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "AWS service endpoints"
+  }
+  tags = local.tags
+}
+resource "aws_lb_target_group" "staff_portal" {
+  count       = var.enable_staff_portal ? 1 : 0
+  name_prefix = "khportal-"
+  port        = 8080
+  protocol    = "HTTP"
+  target_type = "ip"
+  vpc_id      = aws_vpc.main.id
+  health_check {
+    enabled             = true
+    path                = "/"
+    matcher             = "200"
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+    timeout             = 5
+    interval            = 15
+  }
+  tags = local.tags
+}
+resource "aws_lb_listener_rule" "staff_portal" {
+  count        = var.enable_staff_portal ? 1 : 0
+  listener_arn = aws_lb_listener.https[0].arn
+  priority     = 10
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.staff_portal[0].arn
+  }
+  condition {
+    host_header { values = [var.staff_portal_hostname] }
+  }
+  tags = local.tags
+}
+resource "aws_ecs_task_definition" "staff_portal" {
+  count                    = var.enable_staff_portal ? 1 : 0
+  family                   = "${local.name}-staff-portal"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.staff_portal_execution[0].arn
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "ARM64"
+  }
+  container_definitions = jsonencode([{
+    name             = "staff-portal"
+    image            = var.staff_portal_image_uri
+    essential        = true
+    portMappings     = [{ containerPort = 8080, hostPort = 8080, protocol = "tcp" }]
+    environment      = [{ name = "NODE_ENV", value = "production" }]
+    logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.staff_portal[0].name, awslogs-region = var.region, awslogs-stream-prefix = "portal" } }
+    healthCheck      = { command = ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/ || exit 1"], interval = 30, timeout = 5, retries = 3, startPeriod = 20 }
+  }])
+  tags = local.tags
+}
+resource "aws_ecs_service" "staff_portal" {
+  count                              = var.enable_staff_portal ? 1 : 0
+  name                               = "${local.name}-staff-portal"
+  cluster                            = aws_ecs_cluster.api.id
+  task_definition                    = aws_ecs_task_definition.staff_portal[0].arn
+  desired_count                      = 2
+  launch_type                        = "FARGATE"
+  health_check_grace_period_seconds  = 60
+  deployment_minimum_healthy_percent = 100
+  deployment_maximum_percent         = 200
+  network_configuration {
+    subnets          = aws_subnet.private[*].id
+    security_groups  = [aws_security_group.staff_portal_service[0].id]
+    assign_public_ip = false
+  }
+  load_balancer {
+    target_group_arn = aws_lb_target_group.staff_portal[0].arn
+    container_name   = "staff-portal"
+    container_port   = 8080
+  }
+  depends_on = [aws_lb_listener_rule.staff_portal, terraform_data.staff_portal_deployment_gate]
+  tags       = local.tags
+}
+
 resource "aws_security_group" "database" {
   name_prefix = "${local.name}-database-"
   vpc_id      = aws_vpc.main.id
@@ -690,3 +844,5 @@ output "rds_master_secret_arn" {
 output "api_ecr_repository_url" { value = aws_ecr_repository.api.repository_url }
 output "api_cluster_name" { value = aws_ecs_cluster.api.name }
 output "api_load_balancer_dns_name" { value = try(aws_lb.api[0].dns_name, null) }
+output "staff_portal_ecr_repository_url" { value = try(aws_ecr_repository.staff_portal[0].repository_url, null) }
+output "staff_portal_url" { value = var.enable_staff_portal ? "https://${var.staff_portal_hostname}" : null }
