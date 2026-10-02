@@ -608,7 +608,6 @@ resource "aws_ecs_service" "api" {
   tags       = local.tags
 }
 resource "aws_ecr_repository" "staff_portal" {
-  count                = var.enable_staff_portal ? 1 : 0
   name                 = "${local.name}-staff-portal"
   image_tag_mutability = "IMMUTABLE"
   image_scanning_configuration { scan_on_push = true }
@@ -844,5 +843,5 @@ output "rds_master_secret_arn" {
 output "api_ecr_repository_url" { value = aws_ecr_repository.api.repository_url }
 output "api_cluster_name" { value = aws_ecs_cluster.api.name }
 output "api_load_balancer_dns_name" { value = try(aws_lb.api[0].dns_name, null) }
-output "staff_portal_ecr_repository_url" { value = try(aws_ecr_repository.staff_portal[0].repository_url, null) }
+output "staff_portal_ecr_repository_url" { value = try(aws_ecr_repository.staff_portal.repository_url, null) }
 output "staff_portal_url" { value = var.enable_staff_portal ? "https://${var.staff_portal_hostname}" : null }
