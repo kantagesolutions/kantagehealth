@@ -657,7 +657,7 @@ resource "aws_security_group" "staff_portal_service" {
 }
 resource "aws_lb_target_group" "staff_portal" {
   count       = var.enable_staff_portal ? 1 : 0
-  name_prefix = "khportal-"
+  name_prefix = "khptl-"
   port        = 8080
   protocol    = "HTTP"
   target_type = "ip"
