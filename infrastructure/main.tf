@@ -379,6 +379,16 @@ resource "aws_security_group" "load_balancer" {
     cidr_blocks = [aws_vpc.main.cidr_block]
     description = "Healthcare API tasks only"
   }
+  dynamic "egress" {
+    for_each = var.enable_staff_portal ? [1] : []
+    content {
+      from_port   = 8080
+      to_port     = 8080
+      protocol    = "tcp"
+      cidr_blocks = [aws_vpc.main.cidr_block]
+      description = "Staff Portal tasks only"
+    }
+  }
   tags = local.tags
 }
 resource "aws_security_group" "service" {
