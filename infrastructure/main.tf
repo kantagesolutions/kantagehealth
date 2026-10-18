@@ -440,7 +440,7 @@ resource "aws_ecs_cluster" "api" {
   name = "${local.name}-api"
   setting {
     name  = "containerInsights"
-    value = "enhanced"
+    value = "disabled"
   }
   tags = local.tags
 }
@@ -724,7 +724,7 @@ resource "aws_ecs_service" "staff_portal" {
   name                               = "${local.name}-staff-portal"
   cluster                            = aws_ecs_cluster.api.id
   task_definition                    = aws_ecs_task_definition.staff_portal[0].arn
-  desired_count                      = 2
+  desired_count                      = 1
   launch_type                        = "FARGATE"
   health_check_grace_period_seconds  = 60
   deployment_minimum_healthy_percent = 100
