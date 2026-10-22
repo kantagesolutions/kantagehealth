@@ -127,7 +127,7 @@ export function PortalEntry({ navigate }) {
 export function PatientClinicChooser({ navigate }) {
   return (
     <div className="patient-access-screen">
-      <header><button onClick={() => navigate('/')}><ArrowLeft size={18} /> All portals</button><PortalBrand /></header>
+      <header><PortalBrand /></header>
       <main className="patient-access-card clinic-chooser-card">
         <div className="patient-access-icon"><Stethoscope size={27} /></div>
         <h1>Choose your dental office</h1>
@@ -146,9 +146,7 @@ export function PatientClinicChooser({ navigate }) {
   );
 }
 
-function PatientLogin({ clinic, navigate, onSignIn }) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+function PatientLogin({ clinic, navigate }) {
   return (
     <div className="patient-access-screen">
       <header><button onClick={() => navigate('/patient')}><ArrowLeft size={18} /> Change clinic</button><PortalBrand /></header>
@@ -157,14 +155,12 @@ function PatientLogin({ clinic, navigate, onSignIn }) {
         <span className="patient-access-practice">{clinic.name}</span>
         <h1>Patient login</h1>
         <p>Sign in to manage appointments, documents, billing, and messages for this office.</p>
-        <form onSubmit={(event) => { event.preventDefault(); onSignIn(); }}>
-          <label>Email address<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} /></label>
-          <label>Password<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-          <div className="patient-login-options"><label><input type="checkbox" /> Keep me signed in</label><button type="button">Forgot password?</button></div>
-          <button className="primary">Sign in</button>
+        <form onSubmit={(event) => event.preventDefault()}>
+          <label>Email address<input type="email" autoComplete="username" disabled /></label>
+          <label>Password<input type="password" autoComplete="current-password" disabled /></label>
+          <button className="primary" disabled>Sign in</button>
         </form>
-        <div className="patient-login-help"><ShieldCheck size={17} /><span>Your portal session is private and specific to {clinic.name}.</span></div>
-        <p className="patient-new-account">New patient? <button type="button">Create an account</button></p>
+        <div className="patient-login-help"><ShieldCheck size={17} /><span>Sign in is being connected to verified patient accounts for {clinic.name}. Access is unavailable until authentication is ready.</span></div>
       </main>
     </div>
   );
@@ -330,7 +326,7 @@ export function PatientPortal({ navigate, clinicSlug }) {
     if (active === 'Messages') return <PatientMessages clinic={clinic} />;
     return <PatientProfile />;
   }, [active, appointments, clinic]);
-  if (!signedIn) return <PatientLogin clinic={clinic} navigate={navigate} onSignIn={() => setSignedIn(true)} />;
+  if (!signedIn) return <PatientLogin clinic={clinic} navigate={navigate} />;
   return (
     <div className="patient-shell">
       <PatientSidebar active={active} setActive={setActive} navigate={navigate} clinic={clinic} />

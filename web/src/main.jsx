@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Activity, ArrowRight, BadgeCheck, Building2, CalendarDays, ChevronDown, ChevronLeft, ChevronUp, CircleDollarSign, ClipboardCheck, Copy, Check, CreditCard, FileText, Headset, Home, Link, LogOut, MapPin, Menu, Plus, Search, Settings, ShieldCheck, Upload, UserCog, UserPlus, Users, X } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
-import { PatientClinicChooser, PatientPortal, PortalEntry, patientClinics } from './portal-surfaces.jsx';
+import { PatientClinicChooser, PatientPortal, patientClinics } from './portal-surfaces.jsx';
 
 const organizations=[
   {id:'dana-group',name:'Dr. Dana Group',owner:'Dr. Dana Truesdale',locations:3,status:'Active',onboarding:'Live',revenue:'$597/mo',city:'Baltimore, MD',clinics:[
@@ -123,29 +123,32 @@ function OwnerWorkspace({name}){const [title,description,action]=ownerPages[name
 function OperationsApp({portal='admin',navigate}){const [active,setActive]=useState('Home');const [menuOpen,setMenuOpen]=useState(false);const [rows,setRows]=useState(organizations);const [selectedOrganization,setSelectedOrganization]=useState(portal==='staff'?organizations[0]:null);const [selectedClinic,setSelectedClinic]=useState(null);const [clinicMode,setClinicMode]=useState(false);const [organizationMode,setOrganizationMode]=useState(portal==='staff');const [adminMode,setAdminMode]=useState(portal==='admin');const [showClinicDialog,setShowClinicDialog]=useState(false);const openOrganization=organization=>{setSelectedOrganization(organization);setSelectedClinic(null);setAdminMode(false);setOrganizationMode(true);setActive('Organization Profile')};const openClinic=clinic=>{setSelectedClinic(clinic);setOrganizationMode(false);setClinicMode(true)};const addClinic=clinic=>{const updated={...selectedOrganization,clinics:[...organizationClinics(selectedOrganization),clinic],locations:organizationClinics(selectedOrganization).length+1};setRows(current=>current.map(row=>row.id===updated.id?updated:row));setSelectedOrganization(updated);setShowClinicDialog(false)};if(clinicMode&&selectedOrganization&&selectedClinic)return <ClinicWorkspace clinic={selectedClinic} organization={selectedOrganization} exit={()=>{setClinicMode(false);setOrganizationMode(true)}}/>;if(organizationMode&&selectedOrganization)return <OrganizationWorkspace organization={selectedOrganization} exitLabel={portal==='staff'?'Portal home':'Return to Kantage owner view'} exit={()=>{if(portal==='staff')navigate('/');else{setOrganizationMode(false);setAdminMode(true)}}} openClinic={openClinic} addClinic={()=>setShowClinicDialog(true)}/>;if(adminMode)return <KantageAdminWorkspace openOrganization={openOrganization} rows={rows} setRows={setRows}/>;const display=selectedOrganization&&active==='Organization Profile'?<OrganizationProfile organization={selectedOrganization} back={()=>{setSelectedOrganization(null);setActive('Organizations')}} openClinic={openClinic} openOrganizationPortal={()=>setOrganizationMode(true)} addClinic={()=>setShowClinicDialog(true)}/>:active==='Home'?<HomeScreen setActive={setActive} rows={rows} setRows={setRows} openOrganization={openOrganization}/>:active==='Organizations'?<OrganizationsPage rows={rows} openOrganization={openOrganization}/>:<OwnerWorkspace name={active}/>;return <><div className="app-shell"><Sidebar active={active==='Organization Profile'?'Organizations':active} setActive={setActive} open={menuOpen} setOpen={setMenuOpen}/><div className="page"><header><button className="menu-button" aria-label="Open navigation" onClick={()=>setMenuOpen(true)}><Menu size={22}/></button><span className="greeting">Good morning, Ibrahim</span><button className="profile"><span>IB</span><b>Ibrahim Barry<small>Kantage Owner</small></b><ChevronDown size={18}/></button></header><div className="body">{display}</div></div></div>{showClinicDialog&&selectedOrganization&&<AddClinic close={()=>setShowClinicDialog(false)} onAdd={addClinic}/>}</>}
 
 const portalHosts={admin:'admin.health.kantage.solutions',staff:'staff.health.kantage.solutions',patient:'patient.health.kantage.solutions'};
-const portalHostForPath=path=>path.startsWith('/admin')?portalHosts.admin:path.startsWith('/staff')?portalHosts.staff:path.startsWith('/patient')?portalHosts.patient:'portal.health.kantage.solutions';
+function WorkforceLogin({role}){
+  const label=role==='admin'?'Kantage administrator':'Clinic staff';
+  return <div className="workforce-login"><main className="workforce-login-card"><Brand/><span className="owner-kicker">{label.toUpperCase()} PORTAL</span><h1>{label} sign in</h1><p>This workspace is reserved for authorized {role==='admin'?'Kantage administrators':'clinic team members'}.</p><form onSubmit={event=>event.preventDefault()}><label>Email address<input type="email" autoComplete="username" disabled /></label><label>Password<input type="password" autoComplete="current-password" disabled /></label><button className="primary" type="submit" disabled>Sign in</button></form><p className="workforce-login-notice">Sign in is being connected to verified accounts. Access is unavailable until authentication is ready.</p></main></div>;
+}
 function PortalRouter(){
   const [path,setPath]=useState(window.location.pathname);
   const host=window.location.hostname;
   const navigate=next=>{
-    if(Object.values(portalHosts).includes(host)){
-      const targetHost=portalHostForPath(next);
-      if(targetHost!==host){window.location.assign(`https://${targetHost}${next}`);return}
-    }
+    if(host===portalHosts.admin||host===portalHosts.staff)return;
+    if(host===portalHosts.patient&&!next.startsWith('/patient'))return;
     window.history.pushState({},'',next);setPath(next);
   };
   const requested=path.replace(/\/+$/,'')||'/';
-  const normalized=requested==='/'&&host===portalHosts.admin?'/admin':requested==='/'&&host===portalHosts.staff?'/staff':requested==='/'&&host===portalHosts.patient?'/patient':requested;
+  const normalized=requested==='/'&&host===portalHosts.patient?'/patient':requested;
   const patientMatch=normalized.match(/^\/patient\/([a-z0-9-]+)$/);
-  useEffect(()=>{document.title=normalized==='/admin'?'Kantage Healthcare Admin':normalized==='/staff'?'Kantage Healthcare Staff Portal':normalized.startsWith('/patient')?'Kantage Healthcare Patient Portal':'Kantage Healthcare Portals'},[normalized]);
-  if(host===portalHosts.admin&&normalized!=='/admin')return <OperationsApp portal="admin" navigate={navigate}/>;
-  if(host===portalHosts.staff&&normalized!=='/staff')return <OperationsApp portal="staff" navigate={navigate}/>;
+  useEffect(()=>{document.title=host===portalHosts.admin?'Kantage Healthcare Admin Sign In':host===portalHosts.staff?'Kantage Healthcare Staff Sign In':host===portalHosts.patient?'Kantage Healthcare Patient Portal':'Kantage Healthcare Portals'},[host]);
+  if(host===portalHosts.admin)return <WorkforceLogin role="admin"/>;
+  if(host===portalHosts.staff)return <WorkforceLogin role="staff"/>;
   if(host===portalHosts.patient&&!normalized.startsWith('/patient'))return <PatientClinicChooser navigate={navigate}/>;
-  if(normalized==='/admin')return <OperationsApp portal="admin" navigate={navigate}/>;
-  if(normalized==='/staff')return <OperationsApp portal="staff" navigate={navigate}/>;
+  if(host===portalHosts.patient&&normalized==='/patient')return <PatientClinicChooser navigate={navigate}/>;
+  if(host===portalHosts.patient&&patientMatch&&patientClinics[patientMatch[1]])return <PatientPortal navigate={navigate} clinicSlug={patientMatch[1]}/>;
+  if(host===portalHosts.patient)return <PatientClinicChooser navigate={navigate}/>;
+  if(normalized==='/admin'||normalized==='/staff')return <WorkforceLogin role={normalized==='/admin'?'admin':'staff'}/>;
   if(normalized==='/patient')return <PatientClinicChooser navigate={navigate}/>;
   if(patientMatch&&patientClinics[patientMatch[1]])return <PatientPortal navigate={navigate} clinicSlug={patientMatch[1]}/>;
-  return <PortalEntry navigate={navigate}/>;
+  return <WorkforceLogin role="staff"/>;
 }
 
 window.addEventListener('popstate',()=>window.location.reload());
