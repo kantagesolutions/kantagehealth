@@ -87,6 +87,11 @@ variable "staff_portal_hostname" {
   default     = "portal.health.kantage.solutions"
   description = "Public hostname for the authenticated Kantage Health Staff Portal."
 }
+variable "portal_hostnames" {
+  type        = list(string)
+  default     = ["portal.health.kantage.solutions", "admin.health.kantage.solutions", "staff.health.kantage.solutions", "patient.health.kantage.solutions"]
+  description = "HTTPS hostnames routed to the portal frontend. The ACM certificate must cover every name before enabling these routes."
+}
 
 locals {
   name = "kantage-healthcare-${var.environment}"
@@ -692,7 +697,7 @@ resource "aws_lb_listener_rule" "staff_portal" {
     target_group_arn = aws_lb_target_group.staff_portal[0].arn
   }
   condition {
-    host_header { values = [var.staff_portal_hostname] }
+    host_header { values = var.portal_hostnames }
   }
   tags = local.tags
 }
@@ -855,3 +860,6 @@ output "api_cluster_name" { value = aws_ecs_cluster.api.name }
 output "api_load_balancer_dns_name" { value = try(aws_lb.api[0].dns_name, null) }
 output "staff_portal_ecr_repository_url" { value = try(aws_ecr_repository.staff_portal.repository_url, null) }
 output "staff_portal_url" { value = var.enable_staff_portal ? "https://${var.staff_portal_hostname}" : null }
+output "admin_portal_url" { value = var.enable_staff_portal ? "https://admin.health.kantage.solutions" : null }
+output "clinic_staff_portal_url" { value = var.enable_staff_portal ? "https://staff.health.kantage.solutions" : null }
+output "patient_portal_url" { value = var.enable_staff_portal ? "https://patient.health.kantage.solutions" : null }
