@@ -77,7 +77,7 @@ try {
     if (!master.SecretString) throw new Error('Master database secret is unavailable');
     const masterData = JSON.parse(master.SecretString) as {host?:string;port?:number;dbname?:string};
     const databaseHost = masterData.host ?? required('DATABASE_HOST');
-    const ca = await (await fetch('https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem')).text();
+    const ca = await (await fetch('https://truststore.pki.rds.amazonaws.com/us-east-1/us-east-1-bundle.pem')).text();
     const created = await secrets.send(new CreateSecretCommand({
       Name: tenantDatabaseSecretName,
       Description: 'Least-privilege DentalEMS database login for Kantage Healthcare',
