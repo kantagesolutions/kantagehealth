@@ -113,6 +113,7 @@ try {
     documentsBucket,
     staffUserPoolId,
     staffClientId,
+    staffClientIds: previous?.staffClientIds ?? [],
     bookingClinics: [{ key: bookingKey, locationId, clinicName: 'Express Dental Emergency Services', timezone: 'America/New_York' }],
   };
   registry.tenants = [...registry.tenants.filter(item => item.organizationId !== organizationId), tenant];

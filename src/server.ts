@@ -9,7 +9,7 @@ import { createPaymentRecord, listPayments } from './payments.js';
 import { approveMySupportAccess, listSupportAccess, requestSupportAccess } from './support.js';
 import type { TokenVerifier } from './auth.js';
 import { staffVerifier, verifyStaffToken } from './auth.js';
-import { productionRegistry, TenantPoolRegistry, type TenantConfig, type TenantRegistry } from './tenant-registry.js';
+import { productionRegistry, staffClientIds, TenantPoolRegistry, type TenantConfig, type TenantRegistry } from './tenant-registry.js';
 import { createPublicBookingInquiry } from './public-booking.js';
 
 const requestScope=z.object({organizationId:z.string().uuid(),locationId:z.string().uuid()});
@@ -61,7 +61,7 @@ export function createHealthcareServer(platform:Platform):Server {
       const scope=requestScope.parse({organizationId:request.headers['x-kantage-organization'],locationId:request.headers['x-kantage-location']});
       const bearer=token(request);
       const tenant=await platform.registry.get(scope.organizationId);
-      const claims=await verifyStaffToken(bearer,{userPoolId:tenant.staffUserPoolId,clientId:tenant.staffClientId},platform.verifierFor(tenant));
+      const claims=await verifyStaffToken(bearer,{userPoolId:tenant.staffUserPoolId,clientId:staffClientIds(tenant)},platform.verifierFor(tenant));
       const pool=await platform.pools.get(tenant);
       const requestScopeData={...scope,sub:claims.sub,ip:remoteIp(request),userAgent:String(request.headers['user-agent']??'').slice(0,256)};
       if(request.method==='GET' && path==='/v1/patients') return send(response,200,{patients:await scoped(pool,requestScopeData,listPatients)});
@@ -108,7 +108,7 @@ if(process.argv[1] && fileURLToPath(import.meta.url)===process.argv[1]) {
   if(!Number.isInteger(port) || port<1 || port>65_535) throw new Error('PORT must be a valid TCP port');
   const secrets=new SecretsManagerClient({});
   const pools=new TenantPoolRegistry(secrets);
-  const server=createHealthcareServer({registry:productionRegistry(),pools,verifierFor:tenant=>staffVerifier({userPoolId:tenant.staffUserPoolId,clientId:tenant.staffClientId})});
+  const server=createHealthcareServer({registry:productionRegistry(),pools,verifierFor:tenant=>staffVerifier({userPoolId:tenant.staffUserPoolId,clientId:staffClientIds(tenant)})});
   server.listen(port,'0.0.0.0',()=>console.info(`Kantage Healthcare API listening on ${port}`));
   const stop=()=>server.close(()=>pools.close().finally(()=>process.exit(0)));
   process.once('SIGTERM',stop);

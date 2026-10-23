@@ -4,7 +4,7 @@ import { z } from 'zod';
 const staffTokenClaims=z.object({sub:z.string().min(1),token_use:z.literal('access'),client_id:z.string().min(1)}).passthrough();
 export type StaffClaims=z.infer<typeof staffTokenClaims>;
 
-export interface StaffAuthConfig { userPoolId:string; clientId:string; }
+export interface StaffAuthConfig { userPoolId:string; clientId:string|string[]; }
 export interface TokenVerifier { verify(token:string):Promise<unknown>; }
 
 export function staffVerifier(config:StaffAuthConfig):TokenVerifier {
@@ -15,6 +15,7 @@ export async function verifyStaffToken(token:string,config:StaffAuthConfig,verif
   if(!token || token.length>16_384) throw new Error('Unauthorized');
   const verified=await verifier.verify(token).catch(()=>{ throw new Error('Unauthorized'); });
   const claims=staffTokenClaims.safeParse(verified);
-  if(!claims.success || claims.data.client_id!==config.clientId) throw new Error('Unauthorized');
+  const clientIds=Array.isArray(config.clientId)?config.clientId:[config.clientId];
+  if(!claims.success || !clientIds.includes(claims.data.client_id)) throw new Error('Unauthorized');
   return claims.data;
 }

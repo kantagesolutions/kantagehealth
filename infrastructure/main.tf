@@ -844,12 +844,43 @@ resource "aws_cognito_user_pool_client" "staff" {
   }
   prevent_user_existence_errors = "ENABLED"
 }
+resource "aws_cognito_user_pool_domain" "portals" {
+  domain       = "kantage-healthcare-${data.aws_caller_identity.current.account_id}"
+  user_pool_id = aws_cognito_user_pool.staff.id
+}
+resource "aws_cognito_user_pool_client" "portals" {
+  name                                 = "${local.name}-portals"
+  user_pool_id                         = aws_cognito_user_pool.staff.id
+  generate_secret                      = false
+  supported_identity_providers         = ["COGNITO"]
+  callback_urls                        = [for hostname in ["admin.health.kantage.solutions", "staff.health.kantage.solutions", "patient.health.kantage.solutions"] : "https://${hostname}/"]
+  logout_urls                          = [for hostname in ["admin.health.kantage.solutions", "staff.health.kantage.solutions", "patient.health.kantage.solutions"] : "https://${hostname}/"]
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_scopes                 = ["openid", "email", "profile"]
+  allowed_oauth_flows_user_pool_client = true
+  explicit_auth_flows                  = ["ALLOW_USER_SRP_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"]
+  access_token_validity                = 15
+  id_token_validity                    = 15
+  refresh_token_validity               = 1
+  token_validity_units {
+    access_token  = "minutes"
+    id_token      = "minutes"
+    refresh_token = "days"
+  }
+  prevent_user_existence_errors = "ENABLED"
+}
 
 output "documents_bucket" {
   value = aws_s3_bucket.documents.id
 }
 output "staff_user_pool_id" {
   value = aws_cognito_user_pool.staff.id
+}
+output "portal_user_pool_client_id" {
+  value = aws_cognito_user_pool_client.portals.id
+}
+output "portal_login_domain" {
+  value = "https://${aws_cognito_user_pool_domain.portals.domain}.auth.${var.region}.amazoncognito.com"
 }
 output "rds_master_secret_arn" {
   value     = aws_db_instance.clinical.master_user_secret[0].secret_arn
