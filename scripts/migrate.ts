@@ -2,11 +2,15 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from 'pg';
+import { databaseClientFromSecret } from './database-secret.js';
 
 const connectionString=process.env.DATABASE_URL;
-if(!connectionString) throw new Error('DATABASE_URL is required');
+const databaseSecretId=process.env.DATABASE_SECRET_ID;
+if(!connectionString && !databaseSecretId) throw new Error('DATABASE_URL or DATABASE_SECRET_ID is required');
 
-const client=new Client({connectionString,ssl:process.env.DATABASE_SSL==='true'?{rejectUnauthorized:true}:undefined});
+const client=databaseSecretId
+  ? await databaseClientFromSecret(databaseSecretId)
+  : new Client({connectionString,ssl:process.env.DATABASE_SSL==='true'?{rejectUnauthorized:true}:undefined});
 await client.connect();
 try {
   await client.query('CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
