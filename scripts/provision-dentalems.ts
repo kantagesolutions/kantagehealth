@@ -75,13 +75,14 @@ try {
     tenantPassword = randomBytes(36).toString('base64url');
     const master = await secrets.send(new GetSecretValueCommand({ SecretId: masterSecretId }));
     if (!master.SecretString) throw new Error('Master database secret is unavailable');
-    const masterData = JSON.parse(master.SecretString) as {host:string;port?:number;dbname?:string};
+    const masterData = JSON.parse(master.SecretString) as {host?:string;port?:number;dbname?:string};
+    const databaseHost = masterData.host ?? required('DATABASE_HOST');
     const ca = await (await fetch('https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem')).text();
     const created = await secrets.send(new CreateSecretCommand({
       Name: tenantDatabaseSecretName,
       Description: 'Least-privilege DentalEMS database login for Kantage Healthcare',
       SecretString: JSON.stringify({
-        host: masterData.host,
+        host: databaseHost,
         port: masterData.port ?? 5432,
         database: masterData.dbname ?? 'clinical',
         username: 'kh_dentalems_app',
