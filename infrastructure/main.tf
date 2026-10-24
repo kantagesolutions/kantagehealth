@@ -714,11 +714,16 @@ resource "aws_ecs_task_definition" "migration" {
     cpu_architecture        = "ARM64"
   }
   container_definitions = jsonencode([{
-    name             = "migration"
-    image            = var.api_image_uri
-    essential        = true
-    command          = ["node", "dist/scripts/migrate.js"]
-    environment      = [{ name = "NODE_ENV", value = "production" }, { name = "DATABASE_SECRET_ID", value = aws_db_instance.clinical.master_user_secret[0].secret_arn }]
+    name      = "migration"
+    image     = var.api_image_uri
+    essential = true
+    command   = ["node", "dist/scripts/migrate.js"]
+    environment = [
+      { name = "NODE_ENV", value = "production" },
+      { name = "DATABASE_SECRET_ID", value = aws_db_instance.clinical.master_user_secret[0].secret_arn },
+      { name = "DATABASE_HOST", value = aws_db_instance.clinical.address },
+      { name = "DATABASE_NAME", value = aws_db_instance.clinical.db_name }
+    ]
     logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.api.name, awslogs-region = var.region, awslogs-stream-prefix = "migration" } }
   }])
   tags = local.tags
