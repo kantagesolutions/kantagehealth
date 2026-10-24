@@ -24,6 +24,9 @@ export class TenantRegistry {
     if(!tenant) throw new Error('Unknown or inactive healthcare organization');
     return tenant;
   }
+  async list():Promise<TenantConfig[]> {
+    return [...(await (this.#cache ??= this.load())).values()];
+  }
   private async load():Promise<Map<string,TenantConfig>> {
     const result=await this.client.send(new GetSecretValueCommand({SecretId:this.registrySecretId}));
     if(!result.SecretString) throw new Error('Healthcare tenant registry is unavailable');

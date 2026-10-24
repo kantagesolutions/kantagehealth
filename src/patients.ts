@@ -19,6 +19,19 @@ export async function createPatient(input:unknown){
  await query('INSERT INTO clinical.patient_locations(organization_id,location_id,patient_id) VALUES($1,$2,$3)',[c.organizationId,c.locationId,id]);
  await audit('patients.create','patient',id); return {id};
 }
+export async function searchRoamingPatients(search:string){
+ const c=requireCapability('patients.edit');
+ const value=z.string().trim().min(3).max(120).parse(search);
+ const result=await query('SELECT * FROM clinical.search_roaming_patients($1,$2,$3)',[c.organizationId,c.locationId,value]);
+ await audit('patients.search','patient'); return result.rows;
+}
+export async function linkPatientToLocation(patientId:string){
+ const c=requireCapability('patients.edit');
+ const id=z.string().uuid().parse(patientId);
+ const result=await query<{linked:boolean}>('SELECT clinical.link_patient_to_location($1,$2,$3) AS linked',[c.organizationId,c.locationId,id]);
+ if(!result.rows[0]?.linked) throw new AccessError(404,'Not found');
+ await audit('patients.link','patient',id); return {id};
+}
 export async function listCareRecords(patientId:string){
  requireCapability('clinical.read');
  const rows=await query('SELECT id,record_type,note,provider_user_id,occurred_at FROM clinical.care_records WHERE patient_id=$1 ORDER BY occurred_at DESC LIMIT 100',[patientId]);

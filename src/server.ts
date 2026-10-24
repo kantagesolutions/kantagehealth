@@ -4,13 +4,14 @@ import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { z, ZodError } from 'zod';
 import { AccessError, scoped } from './context.js';
 import { createAppointment, listAppointments } from './appointments.js';
-import { createCareRecord, createPatient, listCareRecords, listPatients, readPatient } from './patients.js';
+import { createCareRecord, createPatient, linkPatientToLocation, listCareRecords, listPatients, readPatient, searchRoamingPatients } from './patients.js';
 import { createPaymentRecord, listPayments } from './payments.js';
 import { approveMySupportAccess, listSupportAccess, requestSupportAccess } from './support.js';
 import type { TokenVerifier } from './auth.js';
 import { staffVerifier, verifyStaffToken } from './auth.js';
 import { productionRegistry, staffClientIds, TenantPoolRegistry, type TenantConfig, type TenantRegistry } from './tenant-registry.js';
 import { createPublicBookingInquiry } from './public-booking.js';
+import { listStaffWorkspaces } from './workspaces.js';
 
 const requestScope=z.object({organizationId:z.string().uuid(),locationId:z.string().uuid()});
 interface Platform { registry:TenantRegistry; pools:TenantPoolRegistry; verifierFor(tenant:TenantConfig):TokenVerifier; }
@@ -58,6 +59,24 @@ export function createHealthcareServer(platform:Platform):Server {
         }
         return send(response,405,{error:'Method not allowed'});
       }
+      if(request.method==='GET' && path==='/v1/session/workspaces') {
+        const bearer=token(request);
+        const workspaces=[];
+        let tokenAccepted=false;
+        for(const tenant of await platform.registry.list()) {
+          try {
+            const claims=await verifyStaffToken(bearer,{userPoolId:tenant.staffUserPoolId,clientId:staffClientIds(tenant)},platform.verifierFor(tenant));
+            tokenAccepted=true;
+            const pool=await platform.pools.get(tenant);
+            workspaces.push(...await listStaffWorkspaces(pool,tenant.organizationId,claims.sub));
+          } catch(error) {
+            if(error instanceof Error && error.message==='Unauthorized') continue;
+            throw error;
+          }
+        }
+        if(!tokenAccepted) throw new AccessError(401,'Unauthorized');
+        return send(response,200,{workspaces});
+      }
       const scope=requestScope.parse({organizationId:request.headers['x-kantage-organization'],locationId:request.headers['x-kantage-location']});
       const bearer=token(request);
       const tenant=await platform.registry.get(scope.organizationId);
@@ -65,6 +84,10 @@ export function createHealthcareServer(platform:Platform):Server {
       const pool=await platform.pools.get(tenant);
       const requestScopeData={...scope,sub:claims.sub,ip:remoteIp(request),userAgent:String(request.headers['user-agent']??'').slice(0,256)};
       if(request.method==='GET' && path==='/v1/patients') return send(response,200,{patients:await scoped(pool,requestScopeData,listPatients)});
+      if(request.method==='GET' && path==='/v1/patients/search') {
+        const search=new URL(request.url??'/',`http://${request.headers.host??'localhost'}`).searchParams.get('q')??'';
+        return send(response,200,{patients:await scoped(pool,requestScopeData,()=>searchRoamingPatients(search))});
+      }
       if(request.method==='GET' && path==='/v1/appointments') return send(response,200,{appointments:await scoped(pool,requestScopeData,listAppointments)});
       if(request.method==='POST' && path==='/v1/appointments') {
         const payload=await body(request);
@@ -87,6 +110,8 @@ export function createHealthcareServer(platform:Platform):Server {
         return send(response,201,{patient:await scoped(pool,requestScopeData,()=>createPatient(payload))});
       }
       const match=path.match(/^\/v1\/patients\/([0-9a-f-]{36})(?:\/(records))?$/i);
+      const linkMatch=path.match(/^\/v1\/patients\/([0-9a-f-]{36})\/link$/i);
+      if(linkMatch?.[1] && request.method==='POST') return send(response,200,{patient:await scoped(pool,requestScopeData,()=>linkPatientToLocation(linkMatch[1]!))});
       if(match?.[1] && !match[2] && request.method==='GET') return send(response,200,{patient:await scoped(pool,requestScopeData,()=>readPatient(match[1]!))});
       if(match?.[1] && match[2]==='records' && request.method==='GET') return send(response,200,{records:await scoped(pool,requestScopeData,()=>listCareRecords(match[1]!))});
       if(match?.[1] && match[2]==='records' && request.method==='POST') {
