@@ -102,6 +102,11 @@ variable "github_oidc_provider_arn" {
   default     = null
   description = "Existing GitHub Actions OIDC provider ARN. Leave null to create it in this account."
 }
+variable "enable_staff_mfa" {
+  type        = bool
+  default     = false
+  description = "Require software token MFA for workforce users. Keep false during the current controlled testing phase."
+}
 
 locals {
   name                     = "kantage-healthcare-${var.environment}"
@@ -969,11 +974,14 @@ resource "aws_db_instance" "clinical" {
 
 resource "aws_cognito_user_pool" "staff" {
   name                     = "${local.name}-staff"
-  mfa_configuration        = "ON"
+  mfa_configuration        = var.enable_staff_mfa ? "ON" : "OFF"
   username_attributes      = ["email"]
   auto_verified_attributes = ["email"]
-  software_token_mfa_configuration {
-    enabled = true
+  dynamic "software_token_mfa_configuration" {
+    for_each = var.enable_staff_mfa ? [1] : []
+    content {
+      enabled = true
+    }
   }
   password_policy {
     minimum_length                   = 14
