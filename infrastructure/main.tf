@@ -1021,7 +1021,6 @@ resource "aws_cognito_user_pool_domain" "portals" {
 resource "aws_cognito_user_pool_client" "portals" {
   name                                 = "${local.name}-portals"
   user_pool_id                         = aws_cognito_user_pool.staff.id
-  generate_secret                      = false
   supported_identity_providers         = ["COGNITO"]
   callback_urls                        = [for hostname in ["admin.health.kantage.solutions", "staff.health.kantage.solutions", "patient.health.kantage.solutions"] : "https://${hostname}/"]
   logout_urls                          = [for hostname in ["admin.health.kantage.solutions", "staff.health.kantage.solutions", "patient.health.kantage.solutions"] : "https://${hostname}/"]
