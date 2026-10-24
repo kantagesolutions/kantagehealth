@@ -31,3 +31,15 @@ Stage 1 keeps `enable_api_service = false`. It creates the encrypted database, s
 For Stage 2, set `enable_api_service = true` only after the ACM certificate, immutable ECR image URI, and tenant registry secret ARN are real. Run `terraform plan` before each stage, review the AWS cost and resource list, and only then run `terraform apply`.
 
 After the ECS service is healthy, point the API hostname to the load balancer in Cloudflare. Only after the live HTTPS booking route is verified should Express Dental’s public button be switched from the call-only fallback to Kantage Health.
+
+## Automatic production deployment
+
+The workflow at `.github/workflows/deploy-production.yml` deploys every successful push to `main`. It can also be started manually from GitHub Actions.
+
+The workflow first builds the API and portal, applies the migrations to an isolated PostgreSQL test database, and runs the test suite. It then uses GitHub OIDC to obtain short lived AWS credentials. No permanent AWS access key is stored in GitHub.
+
+The deployment publishes immutable ARM64 images, runs the production migration as a one time Fargate task, deploys the API, deploys the portals, waits for both ECS services to stabilize, and verifies the four public health endpoints. ECS deployment circuit breakers restore the previous working task revision if a rollout fails.
+
+Before enabling the workflow, apply the Terraform changes once so AWS has the GitHub OIDC role and migration task definition. The trusted identity is limited to the `kantagesolutions/kantagehealth` repository and its `production` GitHub environment. If this AWS account already has the GitHub OIDC provider, set `github_oidc_provider_arn` to that provider ARN before applying Terraform.
+
+The GitHub `production` environment may be configured without required reviewers for fully automatic deployment. Environment secrets are not required. Repository pushes still require the normal branch permissions.

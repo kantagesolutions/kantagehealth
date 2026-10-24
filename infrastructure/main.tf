@@ -92,15 +92,59 @@ variable "portal_hostnames" {
   default     = ["portal.health.kantage.solutions", "admin.health.kantage.solutions", "staff.health.kantage.solutions", "patient.health.kantage.solutions"]
   description = "HTTPS hostnames routed to the portal frontend. The ACM certificate must cover every name before enabling these routes."
 }
+variable "github_repository" {
+  type        = string
+  default     = "kantagesolutions/kantagehealth"
+  description = "GitHub repository allowed to deploy production through OIDC."
+}
+variable "github_oidc_provider_arn" {
+  type        = string
+  default     = null
+  description = "Existing GitHub Actions OIDC provider ARN. Leave null to create it in this account."
+}
 
 locals {
-  name = "kantage-healthcare-${var.environment}"
+  name                     = "kantage-healthcare-${var.environment}"
+  github_oidc_provider_arn = var.github_oidc_provider_arn != null ? var.github_oidc_provider_arn : aws_iam_openid_connect_provider.github[0].arn
   tags = {
     Application = "Kantage Healthcare"
     Environment = var.environment
     ManagedBy   = "Terraform"
     DataClass   = "PHI"
   }
+}
+
+resource "aws_iam_openid_connect_provider" "github" {
+  count          = var.github_oidc_provider_arn == null ? 1 : 0
+  url            = "https://token.actions.githubusercontent.com"
+  client_id_list = ["sts.amazonaws.com"]
+  tags           = local.tags
+}
+
+data "aws_iam_policy_document" "github_deploy_assume" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = [local.github_oidc_provider_arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:${var.github_repository}:environment:production"]
+    }
+  }
+}
+
+resource "aws_iam_role" "github_deploy" {
+  name               = "${local.name}-github-deploy"
+  assume_role_policy = data.aws_iam_policy_document.github_deploy_assume.json
+  tags               = local.tags
 }
 
 resource "terraform_data" "compliance_gate" {
@@ -609,6 +653,10 @@ resource "aws_ecs_service" "api" {
   health_check_grace_period_seconds  = 60
   deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
   network_configuration {
     subnets          = aws_subnet.private[*].id
     security_groups  = [aws_security_group.service.id]
@@ -621,6 +669,54 @@ resource "aws_ecs_service" "api" {
   }
   depends_on = [aws_lb_listener.https, terraform_data.api_deployment_gate]
   tags       = local.tags
+  lifecycle { ignore_changes = [task_definition] }
+}
+
+resource "aws_iam_role" "migration_task" {
+  count              = var.enable_api_service ? 1 : 0
+  name               = "${local.name}-migration-task"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+  tags               = local.tags
+}
+data "aws_iam_policy_document" "migration_task" {
+  count = var.enable_api_service ? 1 : 0
+  statement {
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [aws_db_instance.clinical.master_user_secret[0].secret_arn]
+  }
+  statement {
+    actions   = ["kms:Decrypt"]
+    resources = [aws_kms_key.data.arn]
+  }
+}
+resource "aws_iam_role_policy" "migration_task" {
+  count  = var.enable_api_service ? 1 : 0
+  name   = "${local.name}-migration-runtime"
+  role   = aws_iam_role.migration_task[0].id
+  policy = data.aws_iam_policy_document.migration_task[0].json
+}
+resource "aws_ecs_task_definition" "migration" {
+  count                    = var.enable_api_service ? 1 : 0
+  family                   = "${local.name}-migration"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.api_execution.arn
+  task_role_arn            = aws_iam_role.migration_task[0].arn
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "ARM64"
+  }
+  container_definitions = jsonencode([{
+    name             = "migration"
+    image            = var.api_image_uri
+    essential        = true
+    command          = ["node", "dist/scripts/migrate.js"]
+    environment      = [{ name = "NODE_ENV", value = "production" }, { name = "DATABASE_SECRET_ID", value = aws_db_instance.clinical.master_user_secret[0].secret_arn }]
+    logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.api.name, awslogs-region = var.region, awslogs-stream-prefix = "migration" } }
+  }])
+  tags = local.tags
 }
 resource "aws_ecr_repository" "staff_portal" {
   name                 = "${local.name}-staff-portal"
@@ -734,6 +830,10 @@ resource "aws_ecs_service" "staff_portal" {
   health_check_grace_period_seconds  = 60
   deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
   network_configuration {
     subnets          = aws_subnet.private[*].id
     security_groups  = [aws_security_group.staff_portal_service[0].id]
@@ -746,6 +846,68 @@ resource "aws_ecs_service" "staff_portal" {
   }
   depends_on = [aws_lb_listener_rule.staff_portal, terraform_data.staff_portal_deployment_gate]
   tags       = local.tags
+  lifecycle { ignore_changes = [task_definition] }
+}
+
+data "aws_iam_policy_document" "github_deploy" {
+  statement {
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
+  statement {
+    actions = [
+      "ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:CompleteLayerUpload",
+      "ecr:DescribeImages", "ecr:GetDownloadUrlForLayer", "ecr:InitiateLayerUpload",
+      "ecr:PutImage", "ecr:UploadLayerPart"
+    ]
+    resources = [aws_ecr_repository.api.arn, aws_ecr_repository.staff_portal.arn]
+  }
+  statement {
+    actions = ["ecs:DescribeTaskDefinition", "ecs:RegisterTaskDefinition"]
+    resources = [
+      "arn:aws:ecs:${var.region}:${data.aws_caller_identity.current.account_id}:task-definition/${local.name}-api:*",
+      "arn:aws:ecs:${var.region}:${data.aws_caller_identity.current.account_id}:task-definition/${local.name}-staff-portal:*",
+      "arn:aws:ecs:${var.region}:${data.aws_caller_identity.current.account_id}:task-definition/${local.name}-migration:*"
+    ]
+  }
+  statement {
+    actions = ["ecs:DescribeServices", "ecs:UpdateService"]
+    resources = [
+      "arn:aws:ecs:${var.region}:${data.aws_caller_identity.current.account_id}:service/${local.name}-api/${local.name}-api",
+      "arn:aws:ecs:${var.region}:${data.aws_caller_identity.current.account_id}:service/${local.name}-api/${local.name}-staff-portal"
+    ]
+  }
+  statement {
+    actions   = ["ecs:RunTask"]
+    resources = ["arn:aws:ecs:${var.region}:${data.aws_caller_identity.current.account_id}:task-definition/${local.name}-migration:*"]
+    condition {
+      test     = "ArnEquals"
+      variable = "ecs:cluster"
+      values   = [aws_ecs_cluster.api.arn]
+    }
+  }
+  statement {
+    actions   = ["ecs:DescribeTasks"]
+    resources = ["arn:aws:ecs:${var.region}:${data.aws_caller_identity.current.account_id}:task/${local.name}-api/*"]
+  }
+  statement {
+    actions = ["iam:PassRole"]
+    resources = concat(
+      [aws_iam_role.api_execution.arn, aws_iam_role.api_task.arn],
+      var.enable_api_service ? [aws_iam_role.migration_task[0].arn] : [],
+      var.enable_staff_portal ? [aws_iam_role.staff_portal_execution[0].arn] : []
+    )
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["ecs-tasks.amazonaws.com"]
+    }
+  }
+}
+resource "aws_iam_role_policy" "github_deploy" {
+  name   = "${local.name}-github-deploy"
+  role   = aws_iam_role.github_deploy.id
+  policy = data.aws_iam_policy_document.github_deploy.json
 }
 
 resource "aws_security_group" "database" {
@@ -894,3 +1056,5 @@ output "staff_portal_url" { value = var.enable_staff_portal ? "https://${var.sta
 output "admin_portal_url" { value = var.enable_staff_portal ? "https://admin.health.kantage.solutions" : null }
 output "clinic_staff_portal_url" { value = var.enable_staff_portal ? "https://staff.health.kantage.solutions" : null }
 output "patient_portal_url" { value = var.enable_staff_portal ? "https://patient.health.kantage.solutions" : null }
+output "github_deploy_role_arn" { value = aws_iam_role.github_deploy.arn }
+output "migration_task_family" { value = try(aws_ecs_task_definition.migration[0].family, null) }

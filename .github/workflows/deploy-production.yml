@@ -1,0 +1,169 @@
+name: Deploy Kantage Health
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: kantage-health-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: "438064565992"
+  ECS_CLUSTER: kantage-healthcare-production-api
+  API_SERVICE: kantage-healthcare-production-api
+  PORTAL_SERVICE: kantage-healthcare-production-staff-portal
+  API_TASK_FAMILY: kantage-healthcare-production-api
+  PORTAL_TASK_FAMILY: kantage-healthcare-production-staff-portal
+  MIGRATION_TASK_FAMILY: kantage-healthcare-production-migration
+  API_REPOSITORY: kantage-healthcare-production-api
+  PORTAL_REPOSITORY: kantage-healthcare-production-staff-portal
+
+jobs:
+  validate:
+    name: Build and test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: kantage_healthcare_test
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d kantage_healthcare_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+      - name: Use Node 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install API dependencies
+        run: npm ci
+      - name: Install portal dependencies
+        working-directory: web
+        run: npm ci
+      - name: Build API
+        run: npm run build
+      - name: Build portal
+        working-directory: web
+        run: npm run build
+      - name: Create test schema
+        env:
+          DATABASE_URL: postgresql://postgres@127.0.0.1:5432/kantage_healthcare_test
+        run: npm run migrate
+      - name: Run tests
+        env:
+          TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:5432/kantage_healthcare_test
+        run: npm test
+
+  deploy:
+    name: Deploy to AWS
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+      - name: Configure short lived AWS credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/kantage-healthcare-production-github-deploy
+          role-session-name: kantage-health-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Sign in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Enable emulated ARM builds
+        uses: docker/setup-qemu-action@v3
+      - name: Configure Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Set immutable image names
+        run: |
+          TAG="${GITHUB_SHA}-${GITHUB_RUN_ATTEMPT}"
+          echo "API_IMAGE=${{ steps.ecr.outputs.registry }}/${API_REPOSITORY}:${TAG}" >> "$GITHUB_ENV"
+          echo "PORTAL_IMAGE=${{ steps.ecr.outputs.registry }}/${PORTAL_REPOSITORY}:${TAG}" >> "$GITHUB_ENV"
+      - name: Build and publish API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ${{ env.API_IMAGE }}
+          provenance: true
+          sbom: true
+          cache-from: type=gha,scope=health-api
+          cache-to: type=gha,mode=max,scope=health-api
+      - name: Build and publish portal image
+        uses: docker/build-push-action@v6
+        with:
+          context: web
+          file: web/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ${{ env.PORTAL_IMAGE }}
+          provenance: true
+          sbom: true
+          cache-from: type=gha,scope=health-portal
+          cache-to: type=gha,mode=max,scope=health-portal
+      - name: Register migration task revision
+        run: |
+          aws ecs describe-task-definition --task-definition "$MIGRATION_TASK_FAMILY" --query taskDefinition > migration-task.json
+          jq --arg image "$API_IMAGE" 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy) | .containerDefinitions |= map(if .name == "migration" then .image = $image else . end)' migration-task.json > migration-task-next.json
+          MIGRATION_TASK_DEFINITION=$(aws ecs register-task-definition --cli-input-json file://migration-task-next.json --query taskDefinition.taskDefinitionArn --output text)
+          echo "MIGRATION_TASK_DEFINITION=$MIGRATION_TASK_DEFINITION" >> "$GITHUB_ENV"
+      - name: Run database migrations
+        run: |
+          aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$API_SERVICE" --query 'services[0].networkConfiguration.awsvpcConfiguration' > migration-network-value.json
+          jq '{awsvpcConfiguration:.}' migration-network-value.json > migration-network.json
+          MIGRATION_TASK=$(aws ecs run-task --cluster "$ECS_CLUSTER" --launch-type FARGATE --task-definition "$MIGRATION_TASK_DEFINITION" --network-configuration file://migration-network.json --query 'tasks[0].taskArn' --output text)
+          if [ -z "$MIGRATION_TASK" ] || [ "$MIGRATION_TASK" = "None" ]; then
+            echo "Migration task did not start"
+            exit 1
+          fi
+          aws ecs wait tasks-stopped --cluster "$ECS_CLUSTER" --tasks "$MIGRATION_TASK"
+          EXIT_CODE=$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$MIGRATION_TASK" --query 'tasks[0].containers[?name==`migration`].exitCode | [0]' --output text)
+          if [ "$EXIT_CODE" != "0" ]; then
+            aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$MIGRATION_TASK" --query 'tasks[0].{stoppedReason:stoppedReason,containerReason:containers[?name==`migration`].reason|[0]}' --output json
+            exit 1
+          fi
+      - name: Register API task revision
+        run: |
+          aws ecs describe-task-definition --task-definition "$API_TASK_FAMILY" --query taskDefinition > api-task.json
+          jq --arg image "$API_IMAGE" 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy) | .containerDefinitions |= map(if .name == "api" then .image = $image else . end)' api-task.json > api-task-next.json
+          API_TASK_DEFINITION=$(aws ecs register-task-definition --cli-input-json file://api-task-next.json --query taskDefinition.taskDefinitionArn --output text)
+          echo "API_TASK_DEFINITION=$API_TASK_DEFINITION" >> "$GITHUB_ENV"
+      - name: Register portal task revision
+        run: |
+          aws ecs describe-task-definition --task-definition "$PORTAL_TASK_FAMILY" --query taskDefinition > portal-task.json
+          jq --arg image "$PORTAL_IMAGE" 'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy) | .containerDefinitions |= map(if .name == "staff-portal" then .image = $image else . end)' portal-task.json > portal-task-next.json
+          PORTAL_TASK_DEFINITION=$(aws ecs register-task-definition --cli-input-json file://portal-task-next.json --query taskDefinition.taskDefinitionArn --output text)
+          echo "PORTAL_TASK_DEFINITION=$PORTAL_TASK_DEFINITION" >> "$GITHUB_ENV"
+      - name: Deploy API
+        run: aws ecs update-service --cluster "$ECS_CLUSTER" --service "$API_SERVICE" --task-definition "$API_TASK_DEFINITION" --force-new-deployment > /dev/null
+      - name: Wait for API stability
+        run: aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$API_SERVICE"
+      - name: Deploy portals
+        run: aws ecs update-service --cluster "$ECS_CLUSTER" --service "$PORTAL_SERVICE" --task-definition "$PORTAL_TASK_DEFINITION" --force-new-deployment > /dev/null
+      - name: Wait for portal stability
+        run: aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$PORTAL_SERVICE"
+      - name: Verify live services
+        run: |
+          curl --fail --silent --show-error --retry 6 --retry-delay 10 https://health.kantage.solutions/healthz > /dev/null
+          curl --fail --silent --show-error --retry 6 --retry-delay 10 https://admin.health.kantage.solutions/ > /dev/null
+          curl --fail --silent --show-error --retry 6 --retry-delay 10 https://staff.health.kantage.solutions/ > /dev/null
+          curl --fail --silent --show-error --retry 6 --retry-delay 10 https://patient.health.kantage.solutions/ > /dev/null
