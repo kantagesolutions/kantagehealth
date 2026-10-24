@@ -78,6 +78,24 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v6
+      - name: Confirm GitHub deployment identity
+        shell: bash
+        run: |
+          OIDC_TOKEN="$(curl --fail --silent --show-error \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" | jq -r '.value')"
+          OIDC_TOKEN="$OIDC_TOKEN" python3 - <<'PY'
+          import base64
+          import json
+          import os
+
+          payload = os.environ["OIDC_TOKEN"].split(".")[1]
+          payload += "=" * (-len(payload) % 4)
+          claims = json.loads(base64.urlsafe_b64decode(payload))
+          print(f"GitHub OIDC subject: {claims.get('sub')}")
+          print(f"GitHub OIDC audience: {claims.get('aud')}")
+          PY
+          unset OIDC_TOKEN
       - name: Configure short lived AWS credentials
         uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502
         with:
