@@ -29,11 +29,12 @@ test('public booking creates a patient-linked inquiry in the selected clinic sco
     appointmentType: 'Emergency dentistry',
     preferredDate: '2030-05-10',
     preferredContact: 'text',
+    textConsent: true,
     preferredTime: 'Morning',
     message: 'Please call when available.',
   }, { ip: '127.0.0.1', userAgent: 'test-agent' });
 
-  assert.deepEqual(result, { id: 'inquiry-1', patientId: 'patient-1' });
+  assert.deepEqual(result, { id: 'inquiry-1', patientId: 'patient-1', patient:{firstName:'Jamie',lastName:'Example',email:'jamie@example.com',phone:'443-555-0100',textConsent:true} });
   assert.deepEqual(calls[2]?.values?.slice(0, 9), [
     'Jamie', 'Example', '443-555-0100', 'jamie@example.com', 'Emergency dentistry',
     '2030-05-10', 'text', 'Morning', 'Please call when available.',

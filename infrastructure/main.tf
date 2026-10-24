@@ -561,6 +561,18 @@ data "aws_iam_policy_document" "api_task" {
     actions   = ["s3:GetObject", "s3:PutObject"]
     resources = ["${aws_s3_bucket.documents.arn}/*"]
   }
+  statement {
+    actions = [
+      "cognito-idp:AdminCreateUser",
+      "cognito-idp:AdminGetUser",
+      "cognito-idp:AdminAddUserToGroup"
+    ]
+    resources = [aws_cognito_user_pool.staff.arn]
+  }
+  statement {
+    actions   = ["sns:Publish"]
+    resources = ["*"]
+  }
 }
 resource "aws_iam_role_policy" "api_task" {
   name   = "${local.name}-api-runtime"
@@ -641,7 +653,7 @@ resource "aws_ecs_task_definition" "api" {
     image            = var.api_image_uri
     essential        = true
     portMappings     = [{ containerPort = 3000, hostPort = 3000, protocol = "tcp" }]
-    environment      = [{ name = "NODE_ENV", value = "production" }, { name = "PORT", value = "3000" }]
+    environment      = [{ name = "NODE_ENV", value = "production" }, { name = "PORT", value = "3000" }, { name = "STAFF_USER_POOL_ID", value = aws_cognito_user_pool.staff.id }]
     secrets          = [{ name = "KANTAGE_TENANT_REGISTRY_SECRET_ID", valueFrom = var.tenant_registry_secret_arn }]
     logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.api.name, awslogs-region = var.region, awslogs-stream-prefix = "api" } }
     healthCheck      = { command = ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/healthz',res=>process.exit(res.statusCode===200?0:1)).on('error',()=>process.exit(1))\""], interval = 30, timeout = 5, retries = 3, startPeriod = 20 }
@@ -1023,6 +1035,21 @@ resource "aws_cognito_user_pool_client" "staff" {
     refresh_token = "days"
   }
   prevent_user_existence_errors = "ENABLED"
+}
+resource "aws_cognito_user_group" "platform_admin" {
+  name         = "platform_admin"
+  user_pool_id = aws_cognito_user_pool.staff.id
+  description  = "D.A.Y Health Systems platform administrators"
+}
+resource "aws_cognito_user_group" "dentalems_staff" {
+  name         = "dentalems_staff"
+  user_pool_id = aws_cognito_user_pool.staff.id
+  description  = "DentalEMS clinic employees"
+}
+resource "aws_cognito_user_group" "dentalems_patient" {
+  name         = "dentalems_patient"
+  user_pool_id = aws_cognito_user_pool.staff.id
+  description  = "DentalEMS patient portal accounts"
 }
 resource "aws_cognito_user_pool_domain" "portals" {
   domain       = "kantage-healthcare-${data.aws_caller_identity.current.account_id}"

@@ -66,3 +66,16 @@ test('an authenticated employee discovers only assigned clinic workspaces',async
     }]});
   } finally { await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve())); }
 });
+
+test('staff, patient, and admin endpoints reject a valid token without the required portal role',async()=>{
+  const tenant={organizationId:'00000000-0000-4000-8000-000000000001',staffUserPoolId:'us-east-1_example',staffClientId:'portal-client'};
+  const server=createHealthcareServer({registry:{list:async()=>[tenant]},pools:{},verifierFor:()=>({verify:async()=>({sub:'wrong-role',token_use:'access',client_id:'portal-client','cognito:groups':['unrelated']})})} as never);
+  await new Promise<void>((resolve,reject)=>server.listen(0,'127.0.0.1',error=>error?reject(error):resolve()));
+  try {
+    const address=server.address();if(!address||typeof address==='string')throw new Error('No address');
+    for(const path of ['/v1/patient/home','/v1/admin/clients']){
+      const response=await fetch(`http://127.0.0.1:${address.port}${path}`,{headers:{authorization:'Bearer token'}});
+      assert.equal(response.status,403);
+    }
+  } finally {await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+});

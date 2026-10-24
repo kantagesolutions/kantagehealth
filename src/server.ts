@@ -12,12 +12,18 @@ import { staffVerifier, verifyStaffToken } from './auth.js';
 import { productionRegistry, staffClientIds, TenantPoolRegistry, type TenantConfig, type TenantRegistry } from './tenant-registry.js';
 import { createPublicBookingInquiry } from './public-booking.js';
 import { listStaffWorkspaces } from './workspaces.js';
+import { listBookingInquiries, scheduleBookingInquiry } from './bookings.js';
+import { completeDocument, createDocumentUpload, listDocuments, patientDocumentObject } from './documents.js';
+import { CognitoPatientAccountProvisioner, savePatientInvite, type PatientAccountProvisioner } from './patient-accounts.js';
+import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { listPlatformAccess, listPlatformClients, setOrganizationStatus, setUserStatus } from './platform-admin.js';
 
 const requestScope=z.object({organizationId:z.string().uuid(),locationId:z.string().uuid()});
-interface Platform { registry:TenantRegistry; pools:TenantPoolRegistry; verifierFor(tenant:TenantConfig):TokenVerifier; }
+interface Platform { registry:TenantRegistry; pools:TenantPoolRegistry; verifierFor(tenant:TenantConfig):TokenVerifier; patientAccounts?:PatientAccountProvisioner; s3?:S3Client; }
 
 function send(response:ServerResponse,status:number,body:unknown){
-  response.writeHead(status,{"content-type":"application/json; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff"});
+  response.writeHead(status,{"content-type":"application/json; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff","access-control-allow-origin":"*","access-control-allow-headers":"authorization,content-type,x-kantage-organization,x-kantage-location","access-control-allow-methods":"GET,POST,PATCH,OPTIONS"});
   response.end(JSON.stringify(body));
 }
 function token(request:IncomingMessage){
@@ -42,6 +48,7 @@ function allowBooking(ip:string,key:string){ const now=Date.now(), id=`${ip}:${k
 export function createHealthcareServer(platform:Platform):Server {
   return createServer(async(request,response)=>{
     try {
+      if(request.method==='OPTIONS') return send(response,204,{});
       if(request.method==='GET' && request.url==='/healthz') return send(response,200,{status:'ok'});
       const path=(request.url??'/').split('?')[0] ?? '/';
       const publicBookingMatch=path.match(/^\/v1\/public\/booking\/([A-Za-z0-9_-]{20,128})(?:\/inquiries)?$/);
@@ -55,7 +62,12 @@ export function createHealthcareServer(platform:Platform):Server {
           if(!allowBooking(ip,publicBookingMatch[1])) return send(response,429,{error:'Please try again later'});
           const pool=await platform.pools.get(resolved.tenant);
           const inquiry=await createPublicBookingInquiry(pool,target,await body(request),{ip:remoteIp(request),userAgent:String(request.headers['user-agent']??'')});
-          return send(response,201,{inquiry});
+          if(platform.patientAccounts) {
+            const invitation={organizationId:target.organizationId,patientId:inquiry.patientId,email:inquiry.patient.email,phone:inquiry.patient.phone,firstName:inquiry.patient.firstName,clinicName:target.clinicName,textConsent:inquiry.patient.textConsent};
+            try { const invited=await platform.patientAccounts.invite(invitation); if(invited) await savePatientInvite(pool,invitation,invited); }
+            catch(error) { console.error('Patient portal invitation failed',error instanceof Error?error.name:'UnknownError'); }
+          }
+          return send(response,201,{inquiry:{id:inquiry.id,patientId:inquiry.patientId}});
         }
         return send(response,405,{error:'Method not allowed'});
       }
@@ -77,6 +89,62 @@ export function createHealthcareServer(platform:Platform):Server {
         if(!tokenAccepted) throw new AccessError(401,'Unauthorized');
         return send(response,200,{workspaces});
       }
+      if(request.method==='GET' && path==='/v1/patient/home') {
+        const bearer=token(request);
+        for(const tenant of await platform.registry.list()) {
+          try {
+            const claims=await verifyStaffToken(bearer,{userPoolId:tenant.staffUserPoolId,clientId:staffClientIds(tenant)},platform.verifierFor(tenant));
+            const groups=(claims as Record<string,unknown>)['cognito:groups'];
+            if(!Array.isArray(groups) || !groups.includes('dentalems_patient')) throw new AccessError(403);
+            const pool=await platform.pools.get(tenant);
+            const result=await pool.query<{home:unknown}>('SELECT clinical.patient_portal_home($1,$2) AS home',[tenant.organizationId,claims.sub]);
+            if(result.rows[0]?.home) return send(response,200,result.rows[0].home);
+          } catch(error) { if(error instanceof AccessError) throw error; if(error instanceof Error && error.message==='Unauthorized') continue; throw error; }
+        }
+        throw new AccessError(404,'Patient profile not found');
+      }
+      const patientDocumentMatch=path.match(/^\/v1\/patient\/documents\/([0-9a-f-]{36})\/download$/i);
+      if(request.method==='GET' && patientDocumentMatch?.[1]) {
+        if(!platform.s3) throw new Error('Document storage unavailable');
+        const bearer=token(request);
+        for(const tenant of await platform.registry.list()) {
+          try {
+            const claims=await verifyStaffToken(bearer,{userPoolId:tenant.staffUserPoolId,clientId:staffClientIds(tenant)},platform.verifierFor(tenant));
+            const groups=(claims as Record<string,unknown>)['cognito:groups'];
+            if(!Array.isArray(groups) || !groups.includes('dentalems_patient')) throw new AccessError(403);
+            const pool=await platform.pools.get(tenant);
+            const document=await patientDocumentObject((sql,values)=>pool.query(sql,values),tenant.organizationId,claims.sub,patientDocumentMatch[1]);
+            if(!document) continue;
+            const downloadUrl=await getSignedUrl(platform.s3,new GetObjectCommand({Bucket:tenant.documentsBucket,Key:document.object_key,ResponseContentType:document.content_type,ResponseContentDisposition:`attachment; filename="${document.name.replace(/["\\]/g,'_')}"`}),{expiresIn:300});
+            return send(response,200,{downloadUrl});
+          } catch(error) { if(error instanceof AccessError) throw error; if(error instanceof Error && error.message==='Unauthorized') continue; throw error; }
+        }
+        throw new AccessError(404,'Document not found');
+      }
+      if(path.startsWith('/v1/admin/')) {
+        const bearer=token(request); const tenants=await platform.registry.list(); let accepted=false;
+        for(const tenant of tenants){
+          try {
+            const claims=await verifyStaffToken(bearer,{userPoolId:tenant.staffUserPoolId,clientId:staffClientIds(tenant)},platform.verifierFor(tenant));
+            const groups=(claims as Record<string,unknown>)['cognito:groups'];
+            if(Array.isArray(groups)&&groups.includes('platform_admin')) { accepted=true; break; }
+          } catch(error) { if(error instanceof Error&&error.message==='Unauthorized') continue; throw error; }
+        }
+        if(!accepted) throw new AccessError(403);
+        if(request.method==='GET'&&path==='/v1/admin/clients') return send(response,200,{clients:await listPlatformClients(tenants,platform.pools)});
+        if(request.method==='GET'&&path==='/v1/admin/access') return send(response,200,{users:await listPlatformAccess(tenants,platform.pools)});
+        const orgMatch=path.match(/^\/v1\/admin\/clients\/([0-9a-f-]{36})$/i);
+        if(request.method==='PATCH'&&orgMatch?.[1]) {
+          const tenant=tenants.find(item=>item.organizationId===orgMatch[1])??tenants[0]; if(!tenant) throw new AccessError(404);
+          return send(response,200,{client:await setOrganizationStatus(tenant,platform.pools,orgMatch[1],await body(request))});
+        }
+        const userMatch=path.match(/^\/v1\/admin\/access\/([0-9a-f-]{36})\/([0-9a-f-]{36})$/i);
+        if(request.method==='PATCH'&&userMatch?.[1]&&userMatch[2]) {
+          const tenant=tenants.find(item=>item.organizationId===userMatch[1])??tenants[0]; if(!tenant) throw new AccessError(404);
+          return send(response,200,{user:await setUserStatus(tenant,platform.pools,userMatch[1],userMatch[2],await body(request))});
+        }
+        return send(response,404,{error:'Not found'});
+      }
       const scope=requestScope.parse({organizationId:request.headers['x-kantage-organization'],locationId:request.headers['x-kantage-location']});
       const bearer=token(request);
       const tenant=await platform.registry.get(scope.organizationId);
@@ -89,6 +157,12 @@ export function createHealthcareServer(platform:Platform):Server {
         return send(response,200,{patients:await scoped(pool,requestScopeData,()=>searchRoamingPatients(search))});
       }
       if(request.method==='GET' && path==='/v1/appointments') return send(response,200,{appointments:await scoped(pool,requestScopeData,listAppointments)});
+      if(request.method==='GET' && path==='/v1/booking-inquiries') return send(response,200,{inquiries:await scoped(pool,requestScopeData,listBookingInquiries)});
+      const bookingScheduleMatch=path.match(/^\/v1\/booking-inquiries\/([0-9a-f-]{36})\/schedule$/i);
+      if(bookingScheduleMatch?.[1] && request.method==='POST') {
+        const payload=await body(request);
+        return send(response,200,{appointment:await scoped(pool,requestScopeData,()=>scheduleBookingInquiry(bookingScheduleMatch[1]!,payload))});
+      }
       if(request.method==='POST' && path==='/v1/appointments') {
         const payload=await body(request);
         return send(response,201,{appointment:await scoped(pool,requestScopeData,()=>createAppointment(payload))});
@@ -98,6 +172,19 @@ export function createHealthcareServer(platform:Platform):Server {
         const payload=await body(request);
         return send(response,201,{payment:await scoped(pool,requestScopeData,()=>createPaymentRecord(payload))});
       }
+      if(request.method==='GET' && path==='/v1/documents') {
+        const patientId=new URL(request.url??'/',`http://${request.headers.host??'localhost'}`).searchParams.get('patientId')??undefined;
+        return send(response,200,{documents:await scoped(pool,requestScopeData,()=>listDocuments(patientId))});
+      }
+      if(request.method==='POST' && path==='/v1/documents/uploads') {
+        const payload=await body(request);
+        const document=await scoped(pool,requestScopeData,()=>createDocumentUpload(payload));
+        if(!platform.s3) throw new Error('Document storage unavailable');
+        const uploadUrl=await getSignedUrl(platform.s3,new PutObjectCommand({Bucket:tenant.documentsBucket,Key:document.objectKey,ContentType:document.contentType}),{expiresIn:600});
+        return send(response,201,{document:{id:document.id,uploadUrl}});
+      }
+      const completeMatch=path.match(/^\/v1\/documents\/([0-9a-f-]{36})\/complete$/i);
+      if(completeMatch?.[1] && request.method==='POST') return send(response,200,{document:await scoped(pool,requestScopeData,()=>completeDocument(completeMatch[1]!))});
       if(request.method==='GET' && path==='/v1/support-access') return send(response,200,{sessions:await scoped(pool,requestScopeData,listSupportAccess)});
       if(request.method==='POST' && path==='/v1/support-access') {
         const payload=await body(request);
@@ -133,8 +220,8 @@ if(process.argv[1] && fileURLToPath(import.meta.url)===process.argv[1]) {
   if(!Number.isInteger(port) || port<1 || port>65_535) throw new Error('PORT must be a valid TCP port');
   const secrets=new SecretsManagerClient({});
   const pools=new TenantPoolRegistry(secrets);
-  const server=createHealthcareServer({registry:productionRegistry(),pools,verifierFor:tenant=>staffVerifier({userPoolId:tenant.staffUserPoolId,clientId:staffClientIds(tenant)})});
-  server.listen(port,'0.0.0.0',()=>console.info(`Kantage Healthcare API listening on ${port}`));
+  const server=createHealthcareServer({registry:productionRegistry(),pools,verifierFor:tenant=>staffVerifier({userPoolId:tenant.staffUserPoolId,clientId:staffClientIds(tenant)}),patientAccounts:new CognitoPatientAccountProvisioner(),s3:new S3Client({})});
+  server.listen(port,'0.0.0.0',()=>console.info(`D.A.Y Health Systems API listening on ${port}`));
   const stop=()=>server.close(()=>pools.close().finally(()=>process.exit(0)));
   process.once('SIGTERM',stop);
   process.once('SIGINT',stop);

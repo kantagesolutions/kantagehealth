@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Activity, Building2, CalendarDays, ChevronDown, CreditCard, Home, KeyRound, LogOut, MapPin, ShieldCheck, Stethoscope, Users } from 'lucide-react';
+import { Activity, Building2, CalendarDays, ChevronDown, CreditCard, FileText, Home, KeyRound, LogOut, MapPin, ShieldCheck, Stethoscope, Upload, UserCheck, Users, UserX } from 'lucide-react';
 import { beginSignIn, claims, finishSignIn, hasGroup, signOut } from './auth.js';
 import './styles.css';
 
@@ -9,7 +9,7 @@ const dentalEms = {organizationId: '92dccdff-7946-49de-a359-2ad9151c8b84', locat
 const apiUrl = 'https://health.kantage.solutions';
 
 function Brand() {
-  return <div className="brand"><span className="mark" aria-hidden="true"><i /><b /></span><span>Kantage<br />Healthcare</span></div>;
+  return <div className="brand day-brand"><span className="mark day-mark" aria-hidden="true"><i /><b /><em /></span><span><strong>D.A.Y</strong><small>Health Systems</small></span></div>;
 }
 
 function portalRole() {
@@ -19,7 +19,7 @@ function portalRole() {
 }
 
 function Login({ role, error }) {
-  const labels = {admin: 'Kantage administrator', staff: 'DentalEMS staff', patient: 'DentalEMS patient'};
+  const labels = {admin: 'D.A.Y administrator', staff: 'DentalEMS staff', patient: 'DentalEMS patient'};
   const descriptions = {
     admin: 'Manage healthcare clients, clinic access, and platform operations.',
     staff: 'Open the clinic workspace for patients, appointments, and payments.',
@@ -42,6 +42,14 @@ async function loadCollection(path, session, workspace) {
   return response.json();
 }
 
+async function portalRequest(path, session, options = {}, workspace) {
+  const headers={authorization:`Bearer ${session.access_token}`,...(options.body?{'content-type':'application/json'}:{}),...(workspace?{'x-kantage-organization':workspace.organizationId,'x-kantage-location':workspace.locationId}:{})};
+  const response=await fetch(`${apiUrl}${path}`,{...options,headers:{...headers,...options.headers}});
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok) throw new Error(data.error||'The request could not be completed.');
+  return data;
+}
+
 async function loadWorkspaces(session) {
   const response = await fetch(`${apiUrl}/v1/session/workspaces`, {headers: {authorization: `Bearer ${session.access_token}`}});
   if (!response.ok) throw new Error('Your assigned clinics could not be loaded.');
@@ -60,16 +68,20 @@ function AdminPortal({ session }) {
   const identity = claims(session);
   const [active, setActive] = useState('Overview');
   const [platformStatus, setPlatformStatus] = useState('Checking');
-  useEffect(() => { fetch(`${apiUrl}/healthz`).then(response => setPlatformStatus(response.ok ? 'Operational' : 'Needs attention')).catch(() => setPlatformStatus('Needs attention')); }, []);
+  const [clients,setClients]=useState([]); const [users,setUsers]=useState([]); const [error,setError]=useState('');
+  const refresh=()=>Promise.all([portalRequest('/v1/admin/clients',session),portalRequest('/v1/admin/access',session)]).then(([a,b])=>{setClients(a.clients||[]);setUsers(b.users||[]);}).catch(event=>setError(event.message));
+  useEffect(() => { fetch(`${apiUrl}/healthz`).then(response => setPlatformStatus(response.ok ? 'Operational' : 'Needs attention')).catch(() => setPlatformStatus('Needs attention')); refresh(); }, []);
+  const setClientStatus=async client=>{setError('');try{await portalRequest(`/v1/admin/clients/${client.organization_id}`,session,{method:'PATCH',body:JSON.stringify({status:client.status==='active'?'suspended':'active'})});await refresh();}catch(event){setError(event.message);}};
+  const setAccess=async user=>{setError('');try{await portalRequest(`/v1/admin/access/${user.organization_id}/${user.user_id}`,session,{method:'PATCH',body:JSON.stringify({status:user.status==='active'?'inactive':'active'})});await refresh();}catch(event){setError(event.message);}};
   const tabs = [{label: 'Overview', icon: Home}, {label: 'Clients', icon: Building2}, {label: 'Access', icon: KeyRound}, {label: 'Audit', icon: Activity}];
   return <div className="live-portal admin-live-portal">
-    <PortalHeader tone="admin" title="Kantage Healthcare Admin" subtitle={identity.email || 'Platform administrator'} />
+    <PortalHeader tone="admin" title="D.A.Y Health Systems Admin" subtitle={identity.email || 'Platform administrator'} />
     <PortalTabs tone="admin" items={tabs} active={active} onChange={setActive} />
     <main>
-      <div className="admin-hero"><div><div className="live-kicker">PLATFORM CONTROL CENTER</div><h1>{active}</h1><p className="live-intro">Manage client organizations and platform access without opening routine patient records.</p></div><span className={`platform-health ${platformStatus === 'Operational' ? 'healthy' : ''}`}><i />{platformStatus}</span></div>
-      {active === 'Overview' && <><section className="live-metrics admin-metrics"><article><Building2 /><strong>1</strong><span>Active client</span></article><article><Stethoscope /><strong>1</strong><span>Clinic location</span></article><article><ShieldCheck /><strong>{platformStatus === 'Operational' ? 'Online' : 'Check'}</strong><span>Platform status</span></article></section><section className="admin-grid"><article className="live-panel client-summary-card"><div className="client-monogram">DE</div><div><span className="card-eyebrow">ACTIVE CLIENT</span><h2>{dentalEms.name}</h2><p>{dentalEms.location}</p></div><span className="status"><i />Active</span></article><article className="live-panel admin-boundary-card"><ShieldCheck /><div><h2>Privacy boundary active</h2><p>Platform administration stays separate from daily clinic and patient work.</p></div></article></section></>}
-      {active === 'Clients' && <section className="live-panel admin-section"><div className="panel-heading"><div><h2>Client organizations</h2><p>Organizations currently connected to Kantage Healthcare.</p></div></div><div className="admin-client-row"><div className="client-monogram">DE</div><div><strong>{dentalEms.name}</strong><small>{dentalEms.location} · 1 clinic</small></div><span className="status"><i />Active</span></div></section>}
-      {active === 'Access' && <section className="live-panel admin-section admin-message"><KeyRound /><h2>Role controlled access</h2><p>Administrator, clinic staff, and patient accounts are assigned to separate portal groups. A user cannot move between portals without the matching role.</p></section>}
+      <div className="admin-hero"><div><div className="live-kicker">D.A.Y HEALTH SYSTEMS · PLATFORM CONTROL</div><h1>{active}</h1><p className="live-intro">Manage client organizations and platform access without opening routine patient records.</p></div><span className={`platform-health ${platformStatus === 'Operational' ? 'healthy' : ''}`}><i />{platformStatus}</span></div>{error&&<div className="live-error">{error}</div>}
+      {active === 'Overview' && <><section className="live-metrics admin-metrics"><article><Building2 /><strong>{clients.filter(item=>item.status==='active').length}</strong><span>Active clients</span></article><article><Users /><strong>{users.filter(item=>item.status==='active').length}</strong><span>Active staff</span></article><article><ShieldCheck /><strong>{platformStatus === 'Operational' ? 'Online' : 'Check'}</strong><span>Platform status</span></article></section><section className="admin-grid"><article className="live-panel client-summary-card"><div className="client-monogram">DE</div><div><span className="card-eyebrow">CONNECTED CLIENT</span><h2>{clients[0]?.name||dentalEms.name}</h2><p>{clients[0]?.patient_count||0} patients · {clients[0]?.staff_count||0} staff</p></div><span className="status"><i />{clients[0]?.status||'Loading'}</span></article><article className="live-panel admin-boundary-card"><ShieldCheck /><div><h2>Privacy boundary active</h2><p>Platform administration stays separate from daily clinic and patient work.</p></div></article></section></>}
+      {active === 'Clients' && <section className="live-panel admin-section"><div className="panel-heading"><div><h2>Client organizations</h2><p>Activate or suspend access for connected organizations.</p></div></div><div className="admin-list">{clients.map(client=><div className="admin-client-row" key={client.organization_id}><div className="client-monogram">{client.name.split(/\s+/).map(word=>word[0]).join('').slice(0,2)}</div><div><strong>{client.name}</strong><small>{client.clinic_count} clinic · {client.staff_count} staff · {client.patient_count} patients</small></div><span className="status"><i />{client.status}</span><button className="secondary" onClick={()=>setClientStatus(client)}>{client.status==='active'?<UserX size={16}/>:<UserCheck size={16}/>} {client.status==='active'?'Suspend':'Activate'}</button></div>)}</div></section>}
+      {active === 'Access' && <section className="live-panel admin-section"><div className="panel-heading"><div><h2>Staff access</h2><p>Give or remove application access for each client employee.</p></div></div><div className="admin-list">{users.map(user=><div className="admin-client-row" key={user.user_id}><div className="client-monogram">{user.name.split(/\s+/).map(word=>word[0]).join('').slice(0,2)}</div><div><strong>{user.name}</strong><small>{user.email} · {(user.roles||[]).join(', ')}</small></div><span className="status"><i />{user.status}</span><button className="secondary" onClick={()=>setAccess(user)}>{user.status==='active'?'Remove access':'Restore access'}</button></div>)}</div></section>}
       {active === 'Audit' && <section className="live-panel admin-section admin-message"><Activity /><h2>Platform audit activity</h2><p>Administrative and support activity will appear here without exposing routine clinical records.</p></section>}
     </main>
   </div>;
@@ -77,7 +89,7 @@ function AdminPortal({ session }) {
 
 function StaffPortal({ session }) {
   const [active, setActive] = useState('Dashboard');
-  const [data, setData] = useState({patients: [], appointments: [], payments: []});
+  const [data, setData] = useState({patients: [], appointments: [], payments: [], inquiries: [], documents: []});
   const [workspaces, setWorkspaces] = useState([]);
   const [workspace, setWorkspace] = useState(null);
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(true);
@@ -85,6 +97,7 @@ function StaffPortal({ session }) {
   const [patientMatches, setPatientMatches] = useState([]);
   const [searchingPatients, setSearchingPatients] = useState(false);
   const [error, setError] = useState('');
+  const [scheduleId,setScheduleId]=useState(''); const [scheduleTime,setScheduleTime]=useState(''); const [uploadPatient,setUploadPatient]=useState(''); const [uploading,setUploading]=useState(false);
   const identity = claims(session);
   useEffect(() => {
     loadWorkspaces(session).then(items => {
@@ -97,12 +110,15 @@ function StaffPortal({ session }) {
     if (!workspace) return;
     localStorage.setItem('kantage-health-staff-workspace', workspace.locationId);
     setError('');
-    setData({patients: [], appointments: [], payments: []});
-    Promise.all([loadCollection('/v1/patients', session, workspace), loadCollection('/v1/appointments', session, workspace), loadCollection('/v1/payments', session, workspace)]).then(([patients, appointments, payments]) => setData({patients: patients.patients, appointments: appointments.appointments, payments: payments.payments})).catch(event => setError(event.message));
+    setData({patients: [], appointments: [], payments: [], inquiries: [], documents: []});
+    Promise.all([loadCollection('/v1/patients', session, workspace),loadCollection('/v1/appointments',session,workspace),loadCollection('/v1/payments',session,workspace),loadCollection('/v1/booking-inquiries',session,workspace),loadCollection('/v1/documents',session,workspace)]).then(([patients,appointments,payments,inquiries,documents]) => setData({patients:patients.patients,appointments:appointments.appointments,payments:payments.payments,inquiries:inquiries.inquiries,documents:documents.documents})).catch(event => setError(event.message));
   }, [session, workspace]);
   const patientsById = useMemo(() => new Map(data.patients.map(patient => [patient.id, patient])), [data.patients]);
-  const requested = data.appointments.filter(item => item.status === 'requested');
-  const tabs = [{label: 'Dashboard', icon: Home}, {label: 'Patients', icon: Users}, {label: 'Appointments', icon: CalendarDays}, {label: 'Payments', icon: CreditCard}];
+  const requested = data.inquiries.filter(item => item.status === 'new');
+  const tabs = [{label:'Dashboard',icon:Home},{label:'Patients',icon:Users},{label:'Appointments',icon:CalendarDays},{label:'Documents',icon:FileText},{label:'Payments',icon:CreditCard}];
+  const refreshClinic=async()=>{const [patients,appointments,payments,inquiries,documents]=await Promise.all([loadCollection('/v1/patients',session,workspace),loadCollection('/v1/appointments',session,workspace),loadCollection('/v1/payments',session,workspace),loadCollection('/v1/booking-inquiries',session,workspace),loadCollection('/v1/documents',session,workspace)]);setData({patients:patients.patients,appointments:appointments.appointments,payments:payments.payments,inquiries:inquiries.inquiries,documents:documents.documents});};
+  const scheduleRequest=async event=>{event.preventDefault();setError('');try{await portalRequest(`/v1/booking-inquiries/${scheduleId}/schedule`,session,{method:'POST',body:JSON.stringify({startTime:new Date(scheduleTime).toISOString(),durationMinutes:30})},workspace);setScheduleId('');setScheduleTime('');await refreshClinic();}catch(event){setError(event.message);}};
+  const uploadDocument=async event=>{event.preventDefault();const file=event.currentTarget.elements.document.files?.[0];if(!file||!uploadPatient)return;setUploading(true);setError('');try{const created=await portalRequest('/v1/documents/uploads',session,{method:'POST',body:JSON.stringify({patientId:uploadPatient,name:file.name,contentType:file.type,sizeBytes:file.size,documentKind:'uploaded_record'})},workspace);const uploaded=await fetch(created.document.uploadUrl,{method:'PUT',headers:{'content-type':file.type},body:file});if(!uploaded.ok)throw new Error('The file could not be uploaded.');await portalRequest(`/v1/documents/${created.document.id}/complete`,session,{method:'POST'},workspace);event.currentTarget.reset();await refreshClinic();}catch(event){setError(event.message);}finally{setUploading(false);}};
   const findPatient = async event => {
     event.preventDefault();
     if (patientSearch.trim().length < 3) return;
@@ -134,9 +150,10 @@ function StaffPortal({ session }) {
     <PortalHeader title={`${workspace.organizationName} Staff Portal`} subtitle={employeeName} />
     <PortalTabs items={tabs} active={active} onChange={setActive} />
     <main><section className="staff-workspace-bar"><div><span>Current clinic</span><strong><MapPin size={17} />{workspace.locationName}</strong><small>{workspace.locationAddress || workspace.organizationName}</small></div>{workspaces.length > 1 && <label><span>Switch clinic</span><select value={workspace.locationId} onChange={selectWorkspace}>{workspaces.map(item => <option key={`${item.organizationId}:${item.locationId}`} value={item.locationId}>{item.locationName}</option>)}</select><ChevronDown size={17} /></label>}</section><div className="live-kicker">{workspace.organizationName.toUpperCase()} · CLINIC WORKSPACE</div><h1>{active === 'Dashboard' ? 'Clinic command center' : active}</h1><p className="live-intro">Manage this clinic’s live patient, appointment, and payment activity.</p>{error && <div className="live-error">{error}</div>}
-      {active === 'Dashboard' && <><section className="live-metrics"><article><Users /><strong>{data.patients.length}</strong><span>Patients</span></article><article><CalendarDays /><strong>{data.appointments.length}</strong><span>Appointments</span></article><article><Stethoscope /><strong>{requested.length}</strong><span>Booking requests</span></article></section><section className="staff-dashboard-grid"><article className="live-panel"><div className="panel-heading"><div><h2>New booking requests</h2><p>Requests submitted through the practice website.</p></div></div>{requested.length ? <div className="request-stack">{requested.slice(0, 4).map(item => { const patient = patientsById.get(item.patient_id); return <div key={item.id}><CalendarDays /><span><strong>{patient ? `${patient.first_name} ${patient.last_name}` : 'Patient request'}</strong><small>{item.service}</small></span><b>{item.status}</b></div>; })}</div> : <div className="compact-empty"><CalendarDays /><span>No new booking requests.</span></div>}</article><article className="live-panel staff-clinic-card"><div className="patient-clinic-badge">{clinicInitials}</div><span className="card-eyebrow">CURRENT CLINIC</span><h2>{workspace.locationName}</h2><p>{workspace.locationAddress || workspace.organizationName}</p><div className="status"><i />Connected</div></article></section></>}
+      {active === 'Dashboard' && <><section className="live-metrics"><article><Users /><strong>{data.patients.length}</strong><span>Patients</span></article><article><CalendarDays /><strong>{data.appointments.filter(item=>item.status==='confirmed').length}</strong><span>Scheduled</span></article><article><Stethoscope /><strong>{requested.length}</strong><span>Booking requests</span></article></section><section className="staff-dashboard-grid"><article className="live-panel"><div className="panel-heading"><div><h2>New booking requests</h2><p>Requests submitted through the practice website.</p></div></div>{requested.length ? <div className="request-stack booking-stack">{requested.slice(0,6).map(item => <div key={item.id}><CalendarDays /><span><strong>{item.first_name} {item.last_name}</strong><small>{item.appointment_type} · {item.preferred_date||'Flexible'} {item.preferred_time}</small><small>{item.phone} · portal {item.activation_status}</small></span><button className="secondary" onClick={()=>setScheduleId(item.id)}>Schedule</button></div>)}</div> : <div className="compact-empty"><CalendarDays /><span>No new booking requests.</span></div>}{scheduleId&&<form className="inline-schedule" onSubmit={scheduleRequest}><label>Appointment date and time<input type="datetime-local" value={scheduleTime} onChange={event=>setScheduleTime(event.target.value)} required/></label><button className="primary">Confirm appointment</button><button type="button" className="secondary" onClick={()=>setScheduleId('')}>Cancel</button></form>}</article><article className="live-panel staff-clinic-card"><div className="patient-clinic-badge">{clinicInitials}</div><span className="card-eyebrow">CURRENT CLINIC</span><h2>{workspace.locationName}</h2><p>{workspace.locationAddress || workspace.organizationName}</p><div className="status"><i />Connected</div></article></section></>}
       {active === 'Patients' && <><section className="live-panel patient-roaming-panel"><div className="panel-heading"><div><h2>Find an existing patient</h2><p>Search this organization before creating another profile. Adding a match makes the same patient available at this clinic.</p></div></div><form onSubmit={findPatient}><input aria-label="Search patients" value={patientSearch} onChange={event => setPatientSearch(event.target.value)} placeholder="Name, phone, or exact email" minLength="3" /><button className="primary" type="submit" disabled={searchingPatients}>{searchingPatients ? 'Searching…' : 'Search organization'}</button></form>{patientMatches.length > 0 && <div className="roaming-results">{patientMatches.map(patient => <article key={patient.patient_id}><div><strong>{patient.first_name} {patient.last_name}</strong><small>{patient.phone} · {patient.email || 'No email'}</small></div><button className="secondary" type="button" onClick={() => linkPatient(patient)}>Add to this clinic</button></article>)}</div>}{patientSearch.length >= 3 && !searchingPatients && !patientMatches.length && <p className="search-hint">No unlinked patient matches are displayed.</p>}</section><section className="live-panel"><div className="panel-heading"><div><h2>Patient directory</h2><p>Profiles assigned to {workspace.locationName}.</p></div></div>{patientTable}</section></>}
       {active === 'Appointments' && <section className="live-panel"><div className="panel-heading"><div><h2>Appointment activity</h2><p>Requested, confirmed, and completed visits.</p></div></div>{appointmentTable}</section>}
+      {active === 'Documents' && <section className="live-panel"><div className="panel-heading"><div><h2>Patient documents</h2><p>Upload a PDF or image to a patient’s secure portal.</p></div></div><form className="document-upload" onSubmit={uploadDocument}><label>Patient<select value={uploadPatient} onChange={event=>setUploadPatient(event.target.value)} required><option value="">Choose a patient</option>{data.patients.map(patient=><option key={patient.id} value={patient.id}>{patient.first_name} {patient.last_name}</option>)}</select></label><label>Document<input name="document" type="file" accept="application/pdf,image/jpeg,image/png" required/></label><button className="primary" disabled={uploading}><Upload size={16}/>{uploading?'Uploading…':'Send to patient portal'}</button></form><div className="responsive-table"><table><thead><tr><th>Patient</th><th>Document</th><th>Status</th><th>Added</th></tr></thead><tbody>{data.documents.map(document=>{const patient=patientsById.get(document.patient_id);return <tr key={document.id}><td>{patient?`${patient.first_name} ${patient.last_name}`:'Patient'}</td><td>{document.name}</td><td>{document.status}</td><td>{new Date(document.created_at).toLocaleDateString()}</td></tr>})}{!data.documents.length&&<tr><td colSpan="4">No documents have been shared.</td></tr>}</tbody></table></div></section>}
       {active === 'Payments' && <section className="live-panel"><div className="panel-heading"><div><h2>Payment activity</h2><p>Clinic payment records and current statuses.</p></div></div>{paymentTable}</section>}
     </main>
   </div>;
@@ -144,7 +161,10 @@ function StaffPortal({ session }) {
 
 function PatientHome({ session }) {
   const identity = claims(session);
-  return <div className="live-portal patient-live-portal"><PortalHeader title="DentalEMS Patient Portal" subtitle={identity.email || dentalEms.name} /><main className="patient-home-live"><div className="patient-clinic-badge">ED</div><div className="live-kicker">{dentalEms.name.toUpperCase()}</div><h1>Welcome to your patient portal</h1><p>Your secure account is active. Online appointment history and patient specific records will appear here after the clinic verifies your profile.</p><section className="patient-safe-card"><ShieldCheck /><div><strong>Your access is private</strong><span>This account cannot open staff or administrator records.</span></div></section></main></div>;
+  const [home,setHome]=useState(null);const [error,setError]=useState('');const [downloading,setDownloading]=useState('');
+  useEffect(()=>{portalRequest('/v1/patient/home',session).then(setHome).catch(event=>setError(event.message));},[session]);
+  const downloadDocument=async item=>{setDownloading(item.id);setError('');try{const result=await portalRequest(`/v1/patient/documents/${item.id}/download`,session);window.location.assign(result.downloadUrl);}catch(event){setError(event.message);}finally{setDownloading('');}};
+  return <div className="live-portal patient-live-portal"><PortalHeader title="DentalEMS Patient Portal" subtitle={identity.email || dentalEms.name} /><main className="patient-home-live"><div className="patient-clinic-badge">ED</div><div className="live-kicker">{dentalEms.name.toUpperCase()}</div><h1>{home?.patient?`Welcome, ${home.patient.firstName}`:'Welcome to your patient portal'}</h1><p>Your appointment updates and documents from DentalEMS are kept together here.</p>{error&&<div className="live-error">{error}</div>}<section className="patient-portal-grid"><article className="live-panel"><CalendarDays/><h2>Appointments</h2>{home?.appointments?.length?home.appointments.map(item=><div className="patient-item" key={item.id}><strong>{item.service}</strong><span>{item.startTime?new Date(item.startTime).toLocaleString():'Waiting for the office to schedule'} · {item.status}</span></div>):<p>No appointments are available yet.</p>}</article><article className="live-panel"><FileText/><h2>Documents</h2>{home?.documents?.length?home.documents.map(item=><div className="patient-item patient-document-item" key={item.id}><span><strong>{item.name}</strong><small>Shared {new Date(item.createdAt).toLocaleDateString()}</small></span><button className="secondary" type="button" onClick={()=>downloadDocument(item)} disabled={downloading===item.id}>{downloading===item.id?'Preparing…':'Download'}</button></div>):<p>No documents have been shared yet.</p>}</article></section><section className="patient-safe-card"><ShieldCheck /><div><strong>Your access is private</strong><span>This account cannot open staff or administrator records.</span></div></section></main></div>;
 }
 
 function App() {
@@ -153,10 +173,10 @@ function App() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => { finishSignIn().then(value => setSession(value)).catch(event => setError(event.message)).finally(() => setReady(true)); }, []);
-  useEffect(() => { document.title = `${role === 'admin' ? 'Admin' : role === 'staff' ? 'Staff' : 'Patient'} Login | Kantage Healthcare`; }, [role]);
+  useEffect(() => { document.title = `${role === 'admin' ? 'Admin' : role === 'staff' ? 'Staff' : 'Patient'} Login | D.A.Y Health Systems`; }, [role]);
   if (!ready) return <div className="portal-loading">Loading secure portal…</div>;
   if (!session) return <Login role={role} error={error} />;
-  const authorized = role === 'admin' ? hasGroup(session, 'platform_admin') : role === 'staff' ? true : hasGroup(session, 'dentalems_patient');
+  const authorized = role === 'admin' ? hasGroup(session, 'platform_admin') : role === 'staff' ? hasGroup(session,'dentalems_staff') : hasGroup(session, 'dentalems_patient');
   if (!authorized) return <div className={`workforce-login login-${role}`}><main className="workforce-login-card"><Brand /><h1>Access not assigned</h1><p>This account is valid, but it is not assigned to this portal.</p><button className="primary portal-sign-in" onClick={signOut}>Sign out</button></main></div>;
   if (role === 'admin') return <AdminPortal session={session} />;
   if (role === 'patient') return <PatientHome session={session} />;

@@ -16,6 +16,7 @@ const inquiryInput=z.object({
   appointmentType:z.string().trim().min(1).max(160),
   preferredDate:z.string().date().optional(),
   preferredContact:z.enum(['email','text','phone']).default('email'),
+  textConsent:z.boolean().default(false),
   preferredTime:z.string().trim().max(60).optional(),
   message:z.string().trim().max(1000).optional(),
   website:z.string().max(0).optional(),
@@ -34,7 +35,7 @@ export async function createPublicBookingInquiry(pool:Pool,target:PublicBookingT
       inquiry.preferredContact,inquiry.preferredTime??'',inquiry.message??'',request.ip??null,request.userAgent.slice(0,256),
     ]);
     await client.query('COMMIT');
-    return {id:result.rows[0]!.inquiry_id,patientId:result.rows[0]!.patient_id};
+    return {id:result.rows[0]!.inquiry_id,patientId:result.rows[0]!.patient_id,patient:{firstName:inquiry.firstName,lastName:inquiry.lastName,email:inquiry.email??null,phone:inquiry.phone,textConsent:inquiry.textConsent}};
   } catch(error) {
     await client.query('ROLLBACK').catch(()=>undefined);
     throw error;
