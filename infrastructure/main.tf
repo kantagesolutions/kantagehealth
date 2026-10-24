@@ -92,10 +92,10 @@ variable "portal_hostnames" {
   default     = ["portal.health.kantage.solutions", "admin.health.kantage.solutions", "staff.health.kantage.solutions", "patient.health.kantage.solutions"]
   description = "HTTPS hostnames routed to the portal frontend. The ACM certificate must cover every name before enabling these routes."
 }
-variable "github_repository" {
+variable "github_oidc_subject" {
   type        = string
-  default     = "kantagesolutions/kantagehealth"
-  description = "GitHub repository allowed to deploy production through OIDC."
+  default     = "repo:kantagesolutions@290776816/kantagehealth@1380699237:environment:production"
+  description = "Exact GitHub OIDC subject allowed to deploy production. GitHub includes immutable organization and repository IDs."
 }
 variable "github_oidc_provider_arn" {
   type        = string
@@ -141,7 +141,7 @@ data "aws_iam_policy_document" "github_deploy_assume" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:environment:production"]
+      values   = [var.github_oidc_subject]
     }
   }
 }
