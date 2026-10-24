@@ -868,7 +868,11 @@ data "aws_iam_policy_document" "github_deploy" {
     resources = [aws_ecr_repository.api.arn, aws_ecr_repository.staff_portal.arn]
   }
   statement {
-    actions = ["ecs:DescribeTaskDefinition", "ecs:RegisterTaskDefinition"]
+    actions   = ["ecs:DescribeTaskDefinition"]
+    resources = ["*"]
+  }
+  statement {
+    actions = ["ecs:RegisterTaskDefinition"]
     resources = [
       "arn:aws:ecs:${var.region}:${data.aws_caller_identity.current.account_id}:task-definition/${local.name}-api:*",
       "arn:aws:ecs:${var.region}:${data.aws_caller_identity.current.account_id}:task-definition/${local.name}-staff-portal:*",
@@ -936,8 +940,9 @@ resource "aws_db_parameter_group" "clinical" {
   name   = "${local.name}-postgres16"
   family = "postgres16"
   parameter {
-    name  = "rds.force_ssl"
-    value = "1"
+    name         = "rds.force_ssl"
+    value        = "1"
+    apply_method = "pending-reboot"
   }
   tags = local.tags
 }
