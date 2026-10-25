@@ -58,10 +58,10 @@ GRANT EXECUTE ON FUNCTION clinical.create_public_booking_inquiry(text,text,text,
 CREATE OR REPLACE FUNCTION clinical.platform_activity()
 RETURNS TABLE(organization_name text,location_name text,action text,occurred_at timestamptz)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,clinical AS $$
-  SELECT o.name,l.name,a.action,a.occurred_at
+  SELECT o.name,l.name,a.action,a.at AS occurred_at
   FROM clinical.audit_log a JOIN clinical.organizations o ON o.id=a.organization_id
   LEFT JOIN clinical.locations l ON l.organization_id=a.organization_id AND l.id=a.location_id
-  ORDER BY a.occurred_at DESC LIMIT 100;
+  ORDER BY a.at DESC LIMIT 100;
 $$;
 REVOKE ALL ON FUNCTION clinical.platform_activity() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION clinical.platform_activity() TO kh_request;
