@@ -1,7 +1,7 @@
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import { z } from 'zod';
 
-const staffTokenClaims=z.object({sub:z.string().min(1),token_use:z.literal('access'),client_id:z.string().min(1)}).passthrough();
+const staffTokenClaims=z.object({sub:z.string().min(1),username:z.string().min(1).optional(),token_use:z.literal('access'),client_id:z.string().min(1)}).passthrough();
 export type StaffClaims=z.infer<typeof staffTokenClaims>;
 
 export interface StaffAuthConfig { userPoolId:string; clientId:string|string[]; }

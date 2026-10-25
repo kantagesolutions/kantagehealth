@@ -9,7 +9,7 @@ export interface PatientAccountProvisioner { invite(input:PatientInvite):Promise
 function subOf(attributes:{Name?:string;Value?:string}[]|undefined){ return attributes?.find(item=>item.Name==='sub')?.Value; }
 
 export class CognitoPatientAccountProvisioner implements PatientAccountProvisioner {
-  constructor(private cognito=new CognitoIdentityProviderClient({}),private sns=new SNSClient({}),private userPoolId=process.env.STAFF_USER_POOL_ID??''){}
+  constructor(private cognito=new CognitoIdentityProviderClient({}),private sns=new SNSClient({}),private userPoolId=process.env.PATIENT_USER_POOL_ID??process.env.STAFF_USER_POOL_ID??''){}
   async invite(input:PatientInvite){
     if(!this.userPoolId || !input.email) return undefined;
     let username=input.email.toLowerCase();

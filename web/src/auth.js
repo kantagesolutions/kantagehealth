@@ -1,7 +1,27 @@
-const authConfig = {
+const fallbackPatientConfig = {
   clientId: 'i8paj6abvpevcs833bqrjt6oc',
   domain: 'https://kantage-healthcare-438064565992.auth.us-east-1.amazoncognito.com',
 };
+
+function portalRole() {
+  const hostname = window.location.hostname.toLowerCase();
+  if (hostname.startsWith('admin.') || window.location.pathname === '/admin') return 'admin';
+  if (hostname.startsWith('patient.') || window.location.pathname.startsWith('/patient')) return 'patient';
+  return 'staff';
+}
+
+function authConfig() {
+  const runtime = window.__DAY_AUTH_CONFIG__ || {};
+  return portalRole() === 'patient'
+    ? {clientId: runtime.patientClientId || fallbackPatientConfig.clientId, domain: runtime.patientDomain || fallbackPatientConfig.domain}
+    : {clientId: runtime.workforceClientId, domain: runtime.workforceDomain};
+}
+
+function configuredAuth() {
+  const config = authConfig();
+  if (!config.clientId || !config.domain) throw new Error('This portal sign in is not configured yet.');
+  return config;
+}
 
 const tokenKey = 'kantage-health-portal-session';
 const verifierKey = 'kantage-health-pkce-verifier';
@@ -24,12 +44,13 @@ function redirectUri() {
 }
 
 export async function beginSignIn() {
+  const config = configuredAuth();
   const verifier = randomValue();
   const state = randomValue(24);
   sessionStorage.setItem(verifierKey, verifier);
   sessionStorage.setItem(stateKey, state);
   const params = new URLSearchParams({
-    client_id: authConfig.clientId,
+    client_id: config.clientId,
     response_type: 'code',
     scope: 'openid email profile',
     redirect_uri: redirectUri(),
@@ -37,20 +58,21 @@ export async function beginSignIn() {
     code_challenge_method: 'S256',
     code_challenge: await challengeFor(verifier),
   });
-  window.location.assign(`${authConfig.domain}/oauth2/authorize?${params}`);
+  window.location.assign(`${config.domain}/oauth2/authorize?${params}`);
 }
 
 export async function finishSignIn() {
   const params = new URLSearchParams(window.location.search);
   const code = params.get('code');
   if (!code) return readSession();
+  const config = configuredAuth();
   const verifier = sessionStorage.getItem(verifierKey);
   const expectedState = sessionStorage.getItem(stateKey);
   if (!verifier || !expectedState || params.get('state') !== expectedState) throw new Error('The sign-in response could not be verified. Please try again.');
-  const response = await fetch(`${authConfig.domain}/oauth2/token`, {
+  const response = await fetch(`${config.domain}/oauth2/token`, {
     method: 'POST',
     headers: {'content-type': 'application/x-www-form-urlencoded'},
-    body: new URLSearchParams({grant_type: 'authorization_code', client_id: authConfig.clientId, code, redirect_uri: redirectUri(), code_verifier: verifier}),
+    body: new URLSearchParams({grant_type: 'authorization_code', client_id: config.clientId, code, redirect_uri: redirectUri(), code_verifier: verifier}),
   });
   if (!response.ok) throw new Error('Sign in could not be completed. Please try again.');
   const session = await response.json();
@@ -80,7 +102,8 @@ export function hasGroup(session, group) {
 }
 
 export function signOut() {
+  const config = configuredAuth();
   sessionStorage.removeItem(tokenKey);
-  const params = new URLSearchParams({client_id: authConfig.clientId, logout_uri: redirectUri()});
-  window.location.assign(`${authConfig.domain}/logout?${params}`);
+  const params = new URLSearchParams({client_id: config.clientId, logout_uri: redirectUri()});
+  window.location.assign(`${config.domain}/logout?${params}`);
 }

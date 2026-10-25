@@ -7,7 +7,7 @@ import { createAppointment, listAppointments } from './appointments.js';
 import { createCareRecord, createPatient, linkPatientToLocation, listCareRecords, listPatients, readPatient, searchRoamingPatients } from './patients.js';
 import { createPaymentRecord, listPayments } from './payments.js';
 import { approveMySupportAccess, listSupportAccess, requestSupportAccess } from './support.js';
-import type { TokenVerifier } from './auth.js';
+import type { StaffAuthConfig, TokenVerifier } from './auth.js';
 import { staffVerifier, verifyStaffToken } from './auth.js';
 import { productionRegistry, staffClientIds, TenantPoolRegistry, type TenantConfig, type TenantRegistry } from './tenant-registry.js';
 import { createPublicBookingInquiry } from './public-booking.js';
@@ -20,7 +20,12 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { listPlatformAccess, listPlatformClients, setOrganizationStatus, setUserStatus } from './platform-admin.js';
 
 const requestScope=z.object({organizationId:z.string().uuid(),locationId:z.string().uuid()});
-interface Platform { registry:TenantRegistry; pools:TenantPoolRegistry; verifierFor(tenant:TenantConfig):TokenVerifier; patientAccounts?:PatientAccountProvisioner; s3?:S3Client; }
+interface Platform { registry:TenantRegistry; pools:TenantPoolRegistry; verifierFor(tenant:TenantConfig):TokenVerifier; workforceAuth?:StaffAuthConfig; workforceVerifier?:TokenVerifier; patientAccounts?:PatientAccountProvisioner; s3?:S3Client; }
+
+function patientAuth(tenant:TenantConfig):StaffAuthConfig { return {userPoolId:tenant.staffUserPoolId,clientId:staffClientIds(tenant)}; }
+function workforceAuth(platform:Platform,tenant:TenantConfig):StaffAuthConfig { return platform.workforceAuth??patientAuth(tenant); }
+function workforceVerifier(platform:Platform,tenant:TenantConfig):TokenVerifier { return platform.workforceVerifier??platform.verifierFor(tenant); }
+function workforceIdentity(claims:{sub:string;username?:string}):string { return claims.username??claims.sub; }
 
 function send(response:ServerResponse,status:number,body:unknown){
   response.writeHead(status,{"content-type":"application/json; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff","access-control-allow-origin":"*","access-control-allow-headers":"authorization,content-type,x-kantage-organization,x-kantage-location","access-control-allow-methods":"GET,POST,PATCH,OPTIONS"});
@@ -77,10 +82,10 @@ export function createHealthcareServer(platform:Platform):Server {
         let tokenAccepted=false;
         for(const tenant of await platform.registry.list()) {
           try {
-            const claims=await verifyStaffToken(bearer,{userPoolId:tenant.staffUserPoolId,clientId:staffClientIds(tenant)},platform.verifierFor(tenant));
+            const claims=await verifyStaffToken(bearer,workforceAuth(platform,tenant),workforceVerifier(platform,tenant));
             tokenAccepted=true;
             const pool=await platform.pools.get(tenant);
-            workspaces.push(...await listStaffWorkspaces(pool,tenant.organizationId,claims.sub));
+            workspaces.push(...await listStaffWorkspaces(pool,tenant.organizationId,workforceIdentity(claims)));
           } catch(error) {
             if(error instanceof Error && error.message==='Unauthorized') continue;
             throw error;
@@ -93,7 +98,7 @@ export function createHealthcareServer(platform:Platform):Server {
         const bearer=token(request);
         for(const tenant of await platform.registry.list()) {
           try {
-            const claims=await verifyStaffToken(bearer,{userPoolId:tenant.staffUserPoolId,clientId:staffClientIds(tenant)},platform.verifierFor(tenant));
+            const claims=await verifyStaffToken(bearer,patientAuth(tenant),platform.verifierFor(tenant));
             const groups=(claims as Record<string,unknown>)['cognito:groups'];
             if(!Array.isArray(groups) || !groups.includes('dentalems_patient')) throw new AccessError(403);
             const pool=await platform.pools.get(tenant);
@@ -109,7 +114,7 @@ export function createHealthcareServer(platform:Platform):Server {
         const bearer=token(request);
         for(const tenant of await platform.registry.list()) {
           try {
-            const claims=await verifyStaffToken(bearer,{userPoolId:tenant.staffUserPoolId,clientId:staffClientIds(tenant)},platform.verifierFor(tenant));
+            const claims=await verifyStaffToken(bearer,patientAuth(tenant),platform.verifierFor(tenant));
             const groups=(claims as Record<string,unknown>)['cognito:groups'];
             if(!Array.isArray(groups) || !groups.includes('dentalems_patient')) throw new AccessError(403);
             const pool=await platform.pools.get(tenant);
@@ -125,7 +130,7 @@ export function createHealthcareServer(platform:Platform):Server {
         const bearer=token(request); const tenants=await platform.registry.list(); let accepted=false;
         for(const tenant of tenants){
           try {
-            const claims=await verifyStaffToken(bearer,{userPoolId:tenant.staffUserPoolId,clientId:staffClientIds(tenant)},platform.verifierFor(tenant));
+            const claims=await verifyStaffToken(bearer,workforceAuth(platform,tenant),workforceVerifier(platform,tenant));
             const groups=(claims as Record<string,unknown>)['cognito:groups'];
             if(Array.isArray(groups)&&groups.includes('platform_admin')) { accepted=true; break; }
           } catch(error) { if(error instanceof Error&&error.message==='Unauthorized') continue; throw error; }
@@ -148,9 +153,9 @@ export function createHealthcareServer(platform:Platform):Server {
       const scope=requestScope.parse({organizationId:request.headers['x-kantage-organization'],locationId:request.headers['x-kantage-location']});
       const bearer=token(request);
       const tenant=await platform.registry.get(scope.organizationId);
-      const claims=await verifyStaffToken(bearer,{userPoolId:tenant.staffUserPoolId,clientId:staffClientIds(tenant)},platform.verifierFor(tenant));
+      const claims=await verifyStaffToken(bearer,workforceAuth(platform,tenant),workforceVerifier(platform,tenant));
       const pool=await platform.pools.get(tenant);
-      const requestScopeData={...scope,sub:claims.sub,ip:remoteIp(request),userAgent:String(request.headers['user-agent']??'').slice(0,256)};
+      const requestScopeData={...scope,sub:workforceIdentity(claims),ip:remoteIp(request),userAgent:String(request.headers['user-agent']??'').slice(0,256)};
       if(request.method==='GET' && path==='/v1/patients') return send(response,200,{patients:await scoped(pool,requestScopeData,listPatients)});
       if(request.method==='GET' && path==='/v1/patients/search') {
         const search=new URL(request.url??'/',`http://${request.headers.host??'localhost'}`).searchParams.get('q')??'';
@@ -220,7 +225,9 @@ if(process.argv[1] && fileURLToPath(import.meta.url)===process.argv[1]) {
   if(!Number.isInteger(port) || port<1 || port>65_535) throw new Error('PORT must be a valid TCP port');
   const secrets=new SecretsManagerClient({});
   const pools=new TenantPoolRegistry(secrets);
-  const server=createHealthcareServer({registry:productionRegistry(),pools,verifierFor:tenant=>staffVerifier({userPoolId:tenant.staffUserPoolId,clientId:staffClientIds(tenant)}),patientAccounts:new CognitoPatientAccountProvisioner(),s3:new S3Client({})});
+  const workforceAuthConfig={userPoolId:process.env.WORKFORCE_USER_POOL_ID??'',clientId:process.env.WORKFORCE_PORTAL_CLIENT_ID??''};
+  if(!workforceAuthConfig.userPoolId||!workforceAuthConfig.clientId) throw new Error('Workforce authentication is not configured');
+  const server=createHealthcareServer({registry:productionRegistry(),pools,verifierFor:tenant=>staffVerifier(patientAuth(tenant)),workforceAuth:workforceAuthConfig,workforceVerifier:staffVerifier(workforceAuthConfig),patientAccounts:new CognitoPatientAccountProvisioner(),s3:new S3Client({})});
   server.listen(port,'0.0.0.0',()=>console.info(`D.A.Y Health Systems API listening on ${port}`));
   const stop=()=>server.close(()=>pools.close().finally(()=>process.exit(0)));
   process.once('SIGTERM',stop);

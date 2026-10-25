@@ -47,7 +47,9 @@ test('an authenticated employee discovers only assigned clinic workspaces',async
       timezone:'America/New_York',
       roles:['front_desk'],
     }]})})},
-    verifierFor:()=>({verify:async()=>({sub:'employee-1',token_use:'access',client_id:'staff-client'})}),
+    verifierFor:()=>({verify:async()=>{throw new Error('Patient verifier must not authenticate workforce requests');}}),
+    workforceAuth:{userPoolId:'us-east-1_workforce',clientId:'workforce-client'},
+    workforceVerifier:{verify:async()=>({sub:'employee-subject',username:'employee-1',token_use:'access',client_id:'workforce-client'})},
   } as never);
   await new Promise<void>((resolve,reject)=>server.listen(0,'127.0.0.1',error=>error?reject(error):resolve()));
   try {

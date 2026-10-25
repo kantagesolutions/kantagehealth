@@ -649,11 +649,17 @@ resource "aws_ecs_task_definition" "api" {
     cpu_architecture        = "ARM64"
   }
   container_definitions = jsonencode([{
-    name             = "api"
-    image            = var.api_image_uri
-    essential        = true
-    portMappings     = [{ containerPort = 3000, hostPort = 3000, protocol = "tcp" }]
-    environment      = [{ name = "NODE_ENV", value = "production" }, { name = "PORT", value = "3000" }, { name = "STAFF_USER_POOL_ID", value = aws_cognito_user_pool.staff.id }]
+    name         = "api"
+    image        = var.api_image_uri
+    essential    = true
+    portMappings = [{ containerPort = 3000, hostPort = 3000, protocol = "tcp" }]
+    environment = [
+      { name = "NODE_ENV", value = "production" },
+      { name = "PORT", value = "3000" },
+      { name = "PATIENT_USER_POOL_ID", value = aws_cognito_user_pool.staff.id },
+      { name = "WORKFORCE_USER_POOL_ID", value = aws_cognito_user_pool.workforce.id },
+      { name = "WORKFORCE_PORTAL_CLIENT_ID", value = aws_cognito_user_pool_client.workforce_portals.id }
+    ]
     secrets          = [{ name = "KANTAGE_TENANT_REGISTRY_SECRET_ID", valueFrom = var.tenant_registry_secret_arn }]
     logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.api.name, awslogs-region = var.region, awslogs-stream-prefix = "api" } }
     healthCheck      = { command = ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/healthz',res=>process.exit(res.statusCode===200?0:1)).on('error',()=>process.exit(1))\""], interval = 30, timeout = 5, retries = 3, startPeriod = 20 }
@@ -832,11 +838,17 @@ resource "aws_ecs_task_definition" "staff_portal" {
     cpu_architecture        = "ARM64"
   }
   container_definitions = jsonencode([{
-    name             = "staff-portal"
-    image            = var.staff_portal_image_uri
-    essential        = true
-    portMappings     = [{ containerPort = 8080, hostPort = 8080, protocol = "tcp" }]
-    environment      = [{ name = "NODE_ENV", value = "production" }]
+    name         = "staff-portal"
+    image        = var.staff_portal_image_uri
+    essential    = true
+    portMappings = [{ containerPort = 8080, hostPort = 8080, protocol = "tcp" }]
+    environment = [
+      { name = "NODE_ENV", value = "production" },
+      { name = "WORKFORCE_PORTAL_CLIENT_ID", value = aws_cognito_user_pool_client.workforce_portals.id },
+      { name = "WORKFORCE_LOGIN_DOMAIN", value = "https://${aws_cognito_user_pool_domain.workforce.domain}.auth.${var.region}.amazoncognito.com" },
+      { name = "PATIENT_PORTAL_CLIENT_ID", value = aws_cognito_user_pool_client.portals.id },
+      { name = "PATIENT_LOGIN_DOMAIN", value = "https://${aws_cognito_user_pool_domain.portals.domain}.auth.${var.region}.amazoncognito.com" }
+    ]
     logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.staff_portal[0].name, awslogs-region = var.region, awslogs-stream-prefix = "portal" } }
     healthCheck      = { command = ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/ || exit 1"], interval = 30, timeout = 5, retries = 3, startPeriod = 20 }
   }])
@@ -1021,6 +1033,38 @@ resource "aws_cognito_user_pool" "staff" {
   }
   tags = local.tags
 }
+
+resource "aws_cognito_user_pool" "workforce" {
+  name              = "${local.name}-workforce"
+  mfa_configuration = var.enable_staff_mfa ? "ON" : "OFF"
+  username_configuration { case_sensitive = false }
+  auto_verified_attributes = ["email"]
+  schema {
+    name                = "email"
+    attribute_data_type = "String"
+    required            = true
+    mutable             = true
+  }
+  dynamic "software_token_mfa_configuration" {
+    for_each = var.enable_staff_mfa ? [1] : []
+    content { enabled = true }
+  }
+  password_policy {
+    minimum_length                   = 14
+    require_lowercase                = true
+    require_uppercase                = true
+    require_numbers                  = true
+    require_symbols                  = true
+    temporary_password_validity_days = 3
+  }
+  account_recovery_setting {
+    recovery_mechanism {
+      name     = "verified_email"
+      priority = 1
+    }
+  }
+  tags = local.tags
+}
 resource "aws_cognito_user_pool_client" "staff" {
   name                   = "${local.name}-staff-api"
   user_pool_id           = aws_cognito_user_pool.staff.id
@@ -1051,6 +1095,16 @@ resource "aws_cognito_user_group" "dentalems_patient" {
   user_pool_id = aws_cognito_user_pool.staff.id
   description  = "DentalEMS patient portal accounts"
 }
+resource "aws_cognito_user_group" "workforce_platform_admin" {
+  name         = "platform_admin"
+  user_pool_id = aws_cognito_user_pool.workforce.id
+  description  = "D.A.Y Health Systems platform administrators"
+}
+resource "aws_cognito_user_group" "workforce_dentalems_staff" {
+  name         = "dentalems_staff"
+  user_pool_id = aws_cognito_user_pool.workforce.id
+  description  = "DentalEMS clinic employees"
+}
 resource "aws_cognito_user_pool_domain" "portals" {
   domain       = "kantage-healthcare-${data.aws_caller_identity.current.account_id}"
   user_pool_id = aws_cognito_user_pool.staff.id
@@ -1059,8 +1113,32 @@ resource "aws_cognito_user_pool_client" "portals" {
   name                                 = "${local.name}-portals"
   user_pool_id                         = aws_cognito_user_pool.staff.id
   supported_identity_providers         = ["COGNITO"]
-  callback_urls                        = [for hostname in ["admin.health.kantage.solutions", "staff.health.kantage.solutions", "patient.health.kantage.solutions"] : "https://${hostname}/"]
-  logout_urls                          = [for hostname in ["admin.health.kantage.solutions", "staff.health.kantage.solutions", "patient.health.kantage.solutions"] : "https://${hostname}/"]
+  callback_urls                        = ["https://patient.health.kantage.solutions/"]
+  logout_urls                          = ["https://patient.health.kantage.solutions/"]
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_scopes                 = ["openid", "email", "profile"]
+  allowed_oauth_flows_user_pool_client = true
+  explicit_auth_flows                  = ["ALLOW_USER_SRP_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"]
+  access_token_validity                = 15
+  id_token_validity                    = 15
+  refresh_token_validity               = 1
+  token_validity_units {
+    access_token  = "minutes"
+    id_token      = "minutes"
+    refresh_token = "days"
+  }
+  prevent_user_existence_errors = "ENABLED"
+}
+resource "aws_cognito_user_pool_domain" "workforce" {
+  domain       = "day-health-workforce-${data.aws_caller_identity.current.account_id}"
+  user_pool_id = aws_cognito_user_pool.workforce.id
+}
+resource "aws_cognito_user_pool_client" "workforce_portals" {
+  name                                 = "${local.name}-workforce-portals"
+  user_pool_id                         = aws_cognito_user_pool.workforce.id
+  supported_identity_providers         = ["COGNITO"]
+  callback_urls                        = [for hostname in ["admin.health.kantage.solutions", "staff.health.kantage.solutions"] : "https://${hostname}/"]
+  logout_urls                          = [for hostname in ["admin.health.kantage.solutions", "staff.health.kantage.solutions"] : "https://${hostname}/"]
   allowed_oauth_flows                  = ["code"]
   allowed_oauth_scopes                 = ["openid", "email", "profile"]
   allowed_oauth_flows_user_pool_client = true
@@ -1087,6 +1165,15 @@ output "portal_user_pool_client_id" {
 }
 output "portal_login_domain" {
   value = "https://${aws_cognito_user_pool_domain.portals.domain}.auth.${var.region}.amazoncognito.com"
+}
+output "workforce_user_pool_id" {
+  value = aws_cognito_user_pool.workforce.id
+}
+output "workforce_portal_client_id" {
+  value = aws_cognito_user_pool_client.workforce_portals.id
+}
+output "workforce_login_domain" {
+  value = "https://${aws_cognito_user_pool_domain.workforce.domain}.auth.${var.region}.amazoncognito.com"
 }
 output "rds_master_secret_arn" {
   value     = aws_db_instance.clinical.master_user_secret[0].secret_arn
