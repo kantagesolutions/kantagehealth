@@ -17,15 +17,19 @@ import { completeDocument, createDocumentUpload, listDocuments, patientDocumentO
 import { CognitoPatientAccountProvisioner, savePatientInvite, type PatientAccountProvisioner } from './patient-accounts.js';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { listPlatformAccess, listPlatformClients, setOrganizationStatus, setUserStatus } from './platform-admin.js';
+import { createPlatformClient, createPlatformStaff, listPlatformAccess, listPlatformClients, setOrganizationStatus, setUserStatus } from './platform-admin.js';
+import { CognitoWorkforceAccountProvisioner, type WorkforceAccountProvisioner } from './workforce-accounts.js';
 
 const requestScope=z.object({organizationId:z.string().uuid(),locationId:z.string().uuid()});
-interface Platform { registry:TenantRegistry; pools:TenantPoolRegistry; verifierFor(tenant:TenantConfig):TokenVerifier; workforceAuth?:StaffAuthConfig; workforceVerifier?:TokenVerifier; patientAccounts?:PatientAccountProvisioner; s3?:S3Client; }
+interface Platform { registry:TenantRegistry; pools:TenantPoolRegistry; verifierFor(tenant:TenantConfig):TokenVerifier; workforceAuth?:StaffAuthConfig; workforceVerifier?:TokenVerifier; patientAccounts?:PatientAccountProvisioner; workforceAccounts?:WorkforceAccountProvisioner; s3?:S3Client; }
 
 function patientAuth(tenant:TenantConfig):StaffAuthConfig { return {userPoolId:tenant.staffUserPoolId,clientId:staffClientIds(tenant)}; }
 function workforceAuth(platform:Platform,tenant:TenantConfig):StaffAuthConfig { return platform.workforceAuth??patientAuth(tenant); }
 function workforceVerifier(platform:Platform,tenant:TenantConfig):TokenVerifier { return platform.workforceVerifier??platform.verifierFor(tenant); }
-function workforceIdentity(claims:{sub:string;username?:string}):string { return claims.username??claims.sub; }
+function workforceIdentities(claims:{sub:string;username?:string}):string[] {
+  return [...new Set([claims.username,claims.sub].filter((value): value is string => Boolean(value)))];
+}
+function workforceIdentity(claims:{sub:string;username?:string}):string { return workforceIdentities(claims)[0]??claims.sub; }
 
 function send(response:ServerResponse,status:number,body:unknown){
   response.writeHead(status,{"content-type":"application/json; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff","access-control-allow-origin":"*","access-control-allow-headers":"authorization,content-type,x-kantage-organization,x-kantage-location","access-control-allow-methods":"GET,POST,PATCH,OPTIONS"});
@@ -85,7 +89,7 @@ export function createHealthcareServer(platform:Platform):Server {
             const claims=await verifyStaffToken(bearer,workforceAuth(platform,tenant),workforceVerifier(platform,tenant));
             tokenAccepted=true;
             const pool=await platform.pools.get(tenant);
-            workspaces.push(...await listStaffWorkspaces(pool,tenant.organizationId,workforceIdentity(claims)));
+            workspaces.push(...await listStaffWorkspaces(pool,tenant.organizationId,workforceIdentities(claims)));
           } catch(error) {
             if(error instanceof Error && error.message==='Unauthorized') continue;
             throw error;
@@ -138,6 +142,11 @@ export function createHealthcareServer(platform:Platform):Server {
         if(!accepted) throw new AccessError(403);
         if(request.method==='GET'&&path==='/v1/admin/clients') return send(response,200,{clients:await listPlatformClients(tenants,platform.pools)});
         if(request.method==='GET'&&path==='/v1/admin/access') return send(response,200,{users:await listPlatformAccess(tenants,platform.pools)});
+        if(request.method==='POST'&&path==='/v1/admin/clients') return send(response,201,{client:await createPlatformClient(platform.registry,platform.pools,await body(request))});
+        if(request.method==='POST'&&path==='/v1/admin/staff') {
+          if(!platform.workforceAccounts) throw new Error('Workforce onboarding is unavailable');
+          return send(response,201,{staff:await createPlatformStaff(tenants,platform.pools,platform.workforceAccounts,await body(request))});
+        }
         const orgMatch=path.match(/^\/v1\/admin\/clients\/([0-9a-f-]{36})$/i);
         if(request.method==='PATCH'&&orgMatch?.[1]) {
           const tenant=tenants.find(item=>item.organizationId===orgMatch[1])??tenants[0]; if(!tenant) throw new AccessError(404);
@@ -227,7 +236,7 @@ if(process.argv[1] && fileURLToPath(import.meta.url)===process.argv[1]) {
   const pools=new TenantPoolRegistry(secrets);
   const workforceAuthConfig={userPoolId:process.env.WORKFORCE_USER_POOL_ID??'',clientId:process.env.WORKFORCE_PORTAL_CLIENT_ID??''};
   if(!workforceAuthConfig.userPoolId||!workforceAuthConfig.clientId) throw new Error('Workforce authentication is not configured');
-  const server=createHealthcareServer({registry:productionRegistry(),pools,verifierFor:tenant=>staffVerifier(patientAuth(tenant)),workforceAuth:workforceAuthConfig,workforceVerifier:staffVerifier(workforceAuthConfig),patientAccounts:new CognitoPatientAccountProvisioner(),s3:new S3Client({})});
+  const server=createHealthcareServer({registry:productionRegistry(),pools,verifierFor:tenant=>staffVerifier(patientAuth(tenant)),workforceAuth:workforceAuthConfig,workforceVerifier:staffVerifier(workforceAuthConfig),patientAccounts:new CognitoPatientAccountProvisioner(),workforceAccounts:new CognitoWorkforceAccountProvisioner(),s3:new S3Client({})});
   server.listen(port,'0.0.0.0',()=>console.info(`D.A.Y Health Systems API listening on ${port}`));
   const stop=()=>server.close(()=>pools.close().finally(()=>process.exit(0)));
   process.once('SIGTERM',stop);

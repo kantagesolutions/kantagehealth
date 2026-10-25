@@ -11,7 +11,9 @@ export interface StaffWorkspace {
   roles:string[];
 }
 
-export async function listStaffWorkspaces(pool:Pool,organizationId:string,sub:string):Promise<StaffWorkspace[]> {
+export async function listStaffWorkspaces(pool:Pool,organizationId:string,identities:string[]):Promise<StaffWorkspace[]> {
+  const aliases=[...new Set(identities.filter(value=>value.length>0))];
+  if(!aliases.length) return [];
   const result=await pool.query<{
     organization_id:string;
     organization_name:string;
@@ -21,7 +23,7 @@ export async function listStaffWorkspaces(pool:Pool,organizationId:string,sub:st
     location_address:string;
     timezone:string;
     roles:string[];
-  }>('SELECT * FROM clinical.staff_workspaces($1,$2)',[organizationId,sub]);
+  }>('SELECT * FROM clinical.staff_workspaces($1,$2)',[organizationId,aliases]);
   return result.rows.map(row=>({
     organizationId:row.organization_id,
     organizationName:row.organization_name,

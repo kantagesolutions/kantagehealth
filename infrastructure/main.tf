@@ -545,7 +545,7 @@ resource "aws_iam_role" "api_task" {
 }
 data "aws_iam_policy_document" "api_task" {
   statement {
-    actions = ["secretsmanager:GetSecretValue"]
+    actions = ["secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue"]
     resources = concat(
       var.tenant_registry_secret_arn == null ? [] : [var.tenant_registry_secret_arn],
       [
@@ -567,7 +567,7 @@ data "aws_iam_policy_document" "api_task" {
       "cognito-idp:AdminGetUser",
       "cognito-idp:AdminAddUserToGroup"
     ]
-    resources = [aws_cognito_user_pool.staff.arn]
+    resources = [aws_cognito_user_pool.workforce.arn]
   }
   statement {
     actions   = ["sns:Publish"]

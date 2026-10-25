@@ -1,4 +1,4 @@
-import { GetSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
+import { GetSecretValueCommand, PutSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { Pool } from 'pg';
 import { z } from 'zod';
 
@@ -26,6 +26,12 @@ export class TenantRegistry {
   }
   async list():Promise<TenantConfig[]> {
     return [...(await (this.#cache ??= this.load())).values()];
+  }
+  async add(tenant:TenantConfig):Promise<void> {
+    const tenants=await (this.#cache ??= this.load());
+    if(tenants.has(tenant.organizationId)) throw new Error('Organization is already connected');
+    await this.client.send(new PutSecretValueCommand({SecretId:this.registrySecretId,SecretString:JSON.stringify({tenants:[...tenants.values(),tenant]})}));
+    tenants.set(tenant.organizationId,tenant);
   }
   private async load():Promise<Map<string,TenantConfig>> {
     const result=await this.client.send(new GetSecretValueCommand({SecretId:this.registrySecretId}));

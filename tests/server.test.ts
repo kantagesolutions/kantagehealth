@@ -35,9 +35,9 @@ test('public booking lookup exposes only the selected clinic and no tenant ident
 
 test('an authenticated employee discovers only assigned clinic workspaces',async()=>{
   const tenant={organizationId:'00000000-0000-4000-8000-000000000001',staffUserPoolId:'us-east-1_example',staffClientId:'staff-client'};
-  const server=createHealthcareServer({
-    registry:{list:async()=>[tenant]},
-    pools:{get:async()=>({query:async()=>({rows:[{
+  const mockPool={query:async(_sql:string,params:unknown[])=>{
+    assert.deepEqual(params,[tenant.organizationId,['employee-1','employee-subject']]);
+    return {rows:[{
       organization_id:tenant.organizationId,
       organization_name:'Example Health Group',
       staff_name:'Alex Morgan',
@@ -46,7 +46,11 @@ test('an authenticated employee discovers only assigned clinic workspaces',async
       location_address:'100 Main Street',
       timezone:'America/New_York',
       roles:['front_desk'],
-    }]})})},
+    }]};
+  }};
+  const server=createHealthcareServer({
+    registry:{list:async()=>[tenant]},
+    pools:{get:async()=>mockPool},
     verifierFor:()=>({verify:async()=>{throw new Error('Patient verifier must not authenticate workforce requests');}}),
     workforceAuth:{userPoolId:'us-east-1_workforce',clientId:'workforce-client'},
     workforceVerifier:{verify:async()=>({sub:'employee-subject',username:'employee-1',token_use:'access',client_id:'workforce-client'})},
