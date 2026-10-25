@@ -4,7 +4,7 @@ import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { z, ZodError } from 'zod';
 import { AccessError, scoped } from './context.js';
 import { createAppointment, listAppointments } from './appointments.js';
-import { createCareRecord, createPatient, linkPatientToLocation, listCareRecords, listPatients, readPatient, searchRoamingPatients } from './patients.js';
+import { createCareRecord, createPatient, linkPatientToLocation, listCareRecords, listPatients, patientPortalInvitation, readPatient, searchRoamingPatients } from './patients.js';
 import { createPaymentRecord, listPayments } from './payments.js';
 import { approveMySupportAccess, listSupportAccess, requestSupportAccess } from './support.js';
 import type { StaffAuthConfig, TokenVerifier } from './auth.js';
@@ -17,7 +17,7 @@ import { completeDocument, createDocumentUpload, listDocuments, patientDocumentO
 import { CognitoPatientAccountProvisioner, savePatientInvite, type PatientAccountProvisioner } from './patient-accounts.js';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { createPlatformClient, createPlatformStaff, listPlatformAccess, listPlatformClients, setOrganizationStatus, setUserStatus } from './platform-admin.js';
+import { createPlatformClient, createPlatformStaff, listPlatformAccess, listPlatformActivity, listPlatformClients, setOrganizationStatus, setUserStatus } from './platform-admin.js';
 import { CognitoWorkforceAccountProvisioner, type WorkforceAccountProvisioner } from './workforce-accounts.js';
 
 const requestScope=z.object({organizationId:z.string().uuid(),locationId:z.string().uuid()});
@@ -71,11 +71,6 @@ export function createHealthcareServer(platform:Platform):Server {
           if(!allowBooking(ip,publicBookingMatch[1])) return send(response,429,{error:'Please try again later'});
           const pool=await platform.pools.get(resolved.tenant);
           const inquiry=await createPublicBookingInquiry(pool,target,await body(request),{ip:remoteIp(request),userAgent:String(request.headers['user-agent']??'')});
-          if(platform.patientAccounts) {
-            const invitation={organizationId:target.organizationId,patientId:inquiry.patientId,email:inquiry.patient.email,phone:inquiry.patient.phone,firstName:inquiry.patient.firstName,clinicName:target.clinicName,textConsent:inquiry.patient.textConsent};
-            try { const invited=await platform.patientAccounts.invite(invitation); if(invited) await savePatientInvite(pool,invitation,invited); }
-            catch(error) { console.error('Patient portal invitation failed',error instanceof Error?error.name:'UnknownError'); }
-          }
           return send(response,201,{inquiry:{id:inquiry.id,patientId:inquiry.patientId}});
         }
         return send(response,405,{error:'Method not allowed'});
@@ -142,6 +137,7 @@ export function createHealthcareServer(platform:Platform):Server {
         if(!accepted) throw new AccessError(403);
         if(request.method==='GET'&&path==='/v1/admin/clients') return send(response,200,{clients:await listPlatformClients(tenants,platform.pools)});
         if(request.method==='GET'&&path==='/v1/admin/access') return send(response,200,{users:await listPlatformAccess(tenants,platform.pools)});
+        if(request.method==='GET'&&path==='/v1/admin/activity') return send(response,200,{activity:await listPlatformActivity(tenants,platform.pools)});
         if(request.method==='POST'&&path==='/v1/admin/clients') return send(response,201,{client:await createPlatformClient(platform.registry,platform.pools,await body(request))});
         if(request.method==='POST'&&path==='/v1/admin/staff') {
           if(!platform.workforceAccounts) throw new Error('Workforce onboarding is unavailable');
@@ -166,6 +162,20 @@ export function createHealthcareServer(platform:Platform):Server {
       const pool=await platform.pools.get(tenant);
       const requestScopeData={...scope,sub:workforceIdentity(claims),ip:remoteIp(request),userAgent:String(request.headers['user-agent']??'').slice(0,256)};
       if(request.method==='GET' && path==='/v1/patients') return send(response,200,{patients:await scoped(pool,requestScopeData,listPatients)});
+      const patientMatch=path.match(/^\/v1\/patients\/([0-9a-f-]{36})$/i);
+      if(request.method==='GET' && patientMatch?.[1]) return send(response,200,{patient:await scoped(pool,requestScopeData,()=>readPatient(patientMatch[1]!))});
+      const portalAccessMatch=path.match(/^\/v1\/patients\/([0-9a-f-]{36})\/portal-access$/i);
+      if(request.method==='POST' && portalAccessMatch?.[1]) {
+        if(!platform.patientAccounts) throw new Error('Patient portal access is unavailable');
+        const enabled=await scoped(pool,requestScopeData,async()=>{
+          const invitation=await patientPortalInvitation(portalAccessMatch[1]!);
+          const result=await platform.patientAccounts!.invite(invitation);
+          if(!result) throw new AccessError(400,'Patient email is required before portal access can be enabled');
+          await savePatientInvite(pool,invitation,result);
+          return {emailSent:result.emailSent,textSent:result.textSent};
+        });
+        return send(response,200,{portalAccess:enabled});
+      }
       if(request.method==='GET' && path==='/v1/patients/search') {
         const search=new URL(request.url??'/',`http://${request.headers.host??'localhost'}`).searchParams.get('q')??'';
         return send(response,200,{patients:await scoped(pool,requestScopeData,()=>searchRoamingPatients(search))});

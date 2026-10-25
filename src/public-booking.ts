@@ -30,9 +30,9 @@ export async function createPublicBookingInquiry(pool:Pool,target:PublicBookingT
   try {
     await client.query('BEGIN');
     await client.query("SELECT set_config('app.current_org',$1,true),set_config('app.current_location',$2,true)",[target.organizationId,target.locationId]);
-    const result=await client.query<{inquiry_id:string;patient_id:string}>('SELECT * FROM clinical.create_public_booking_inquiry($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',[
+    const result=await client.query<{inquiry_id:string;patient_id:string}>('SELECT * FROM clinical.create_public_booking_inquiry($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',[
       inquiry.firstName,inquiry.lastName,inquiry.phone,inquiry.email??null,inquiry.appointmentType,inquiry.preferredDate??null,
-      inquiry.preferredContact,inquiry.preferredTime??'',inquiry.message??'',request.ip??null,request.userAgent.slice(0,256),
+      inquiry.preferredContact,inquiry.preferredTime??'',inquiry.message??'',inquiry.textConsent,request.ip??null,request.userAgent.slice(0,256),
     ]);
     await client.query('COMMIT');
     return {id:result.rows[0]!.inquiry_id,patientId:result.rows[0]!.patient_id,patient:{firstName:inquiry.firstName,lastName:inquiry.lastName,email:inquiry.email??null,phone:inquiry.phone,textConsent:inquiry.textConsent}};

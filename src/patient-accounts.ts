@@ -25,7 +25,9 @@ export class CognitoPatientAccountProvisioner implements PatientAccountProvision
       const existing=await this.cognito.send(new AdminGetUserCommand({UserPoolId:this.userPoolId,Username:username}));
       username=existing.Username??username;
       sub=subOf(existing.UserAttributes);
-      emailSent=true;
+      // An existing account must not receive another unsolicited activation email.
+      // Staff can tell the patient to use the normal password recovery flow instead.
+      emailSent=false;
     }
     if(!sub) throw new Error('Patient account identity was not returned');
     await this.cognito.send(new AdminAddUserToGroupCommand({UserPoolId:this.userPoolId,Username:username,GroupName:'dentalems_patient'}));
@@ -49,7 +51,7 @@ export async function savePatientInvite(pool:Pool,input:PatientInvite,result:Pat
       VALUES($1,$2,$3,$4,'invited',$5,$6,$7)
       ON CONFLICT(organization_id,patient_id) DO UPDATE SET cognito_sub=excluded.cognito_sub,username=excluded.username,status='invited',email_sent=excluded.email_sent,text_sent=excluded.text_sent,sms_consent=excluded.sms_consent,invited_at=now()`,
       [input.organizationId,input.patientId,result.sub,result.username,result.emailSent,result.textSent,input.textConsent]);
-    await client.query(`UPDATE clinical.booking_inquiries SET activation_status=$1 WHERE organization_id=$2 AND patient_id=$3 AND status='new'`,[result.emailSent?'invited':'failed',input.organizationId,input.patientId]);
+    await client.query(`UPDATE clinical.booking_inquiries SET activation_status=$1 WHERE organization_id=$2 AND patient_id=$3`,[result.emailSent?'invited':'partial',input.organizationId,input.patientId]);
     await client.query('COMMIT');
   } catch(error) { await client.query('ROLLBACK').catch(()=>undefined); throw error; }
   finally { client.release(); }

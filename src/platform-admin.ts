@@ -11,6 +11,11 @@ export async function listPlatformClients(tenants:TenantConfig[],pools:TenantPoo
   }
   return rows;
 }
+export async function listPlatformActivity(tenants:TenantConfig[],pools:TenantPoolRegistry){
+  const [tenant]=tenants; if(!tenant) return [];
+  const result=await (await pools.get(tenant)).query<{organization_name:string;location_name:string|null;action:string;occurred_at:string}>('SELECT * FROM clinical.platform_activity()');
+  return result.rows;
+}
 export async function listPlatformAccess(tenants:TenantConfig[],pools:TenantPoolRegistry){
   const rows:unknown[]=[]; const seen=new Set<string>();
   for(const tenant of tenants){
