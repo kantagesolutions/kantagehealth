@@ -102,8 +102,12 @@ export function hasGroup(session, group) {
 }
 
 export function signOut() {
-  const config = configuredAuth();
+  // Clear the local session first so signing out always takes effect, even when the
+  // hosted logout endpoint is unreachable or this portal is not configured yet.
   sessionStorage.removeItem(tokenKey);
+  let config;
+  try { config = configuredAuth(); }
+  catch { window.location.assign(redirectUri()); return; }
   const params = new URLSearchParams({client_id: config.clientId, logout_uri: redirectUri()});
   window.location.assign(`${config.domain}/logout?${params}`);
 }
