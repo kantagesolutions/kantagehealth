@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import test, { after, before } from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { Client, Pool } from 'pg';
-import { createPlatformClient, deleteOrganization, deleteStaff, organizationRecords, setOrganizationStatus, setUserStatus, staffRecords, updatePlatformStaff } from '../src/platform-admin.js';
+import { createPlatformClient, deleteOrganization, deleteStaff, listPlatformActivity, organizationRecords, setOrganizationStatus, setUserStatus, staffRecords, updatePlatformStaff } from '../src/platform-admin.js';
+import { createPublicBookingInquiry } from '../src/public-booking.js';
 import { registrySecretIdFrom, TenantRegistry, type TenantConfig } from '../src/tenant-registry.js';
 import { CognitoWorkforceAccountProvisioner } from '../src/workforce-accounts.js';
 import { listStaffWorkspaces } from '../src/workspaces.js';
@@ -209,4 +210,19 @@ test('a staff member who never acted is deleted; one with activity can only be a
     assert.equal((await check.query('SELECT 1 FROM clinical.audit_log WHERE actor_user_id=$1',[busy])).rowCount,1);
   } finally { await check.end(); }
   assert.ok((await auditRows(orgId)).some(row=>row.action==='staff.delete' && row.target_label==='Idle Person'));
+});
+
+test('a website booking appears in the activity feed without any patient detail',async()=>{
+  const patient={firstName:'Zephyrine',lastName:'Quillfeather',phone:'410-555-0177',email:`zephyrine.${run}@example.test`,message:`Distinctive note ${run} about a cracked molar`};
+  await createPublicBookingInquiry(appPool,{organizationId:orgId,locationId:clinicA,clinicName:'Clinic A',timezone:'America/New_York'},{...patient,appointmentType:'Emergency dentistry',preferredContact:'email'},{userAgent:'healthcare-test'});
+  const activity=await listPlatformActivity([tenant],pools);
+  const arrival=activity.find(row=>row.action==='bookings.received' && row.organization_name==='Platform Test Org');
+  assert.ok(arrival,'booking arrival is in the feed');
+  assert.equal(arrival?.source,'website');
+  assert.equal(arrival?.location_name,'Clinic A');
+  // Nothing identifying, nor the type of care or the message, may appear anywhere in the feed.
+  const everything=JSON.stringify(activity);
+  for(const detail of [patient.firstName,patient.lastName,patient.phone,patient.email,patient.message,'cracked molar','Emergency dentistry']) {
+    assert.equal(everything.includes(detail),false,`feed must not contain "${detail}"`);
+  }
 });
