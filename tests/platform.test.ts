@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import test, { after, before } from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { Client, Pool } from 'pg';
-import { createPlatformClient, deleteOrganization, deleteStaff, listPlatformActivity, organizationRecords, setOrganizationStatus, setUserStatus, staffRecords, updatePlatformStaff } from '../src/platform-admin.js';
+import { createClinic, createPlatformClient, deleteOrganization, deleteStaff, listClinics, listPlatformActivity, organizationRecords, setClinicStatus, setOrganizationStatus, setUserStatus, staffRecords, updateClinic, updatePlatformStaff } from '../src/platform-admin.js';
 import { createPublicBookingInquiry } from '../src/public-booking.js';
 import { registrySecretIdFrom, TenantRegistry, type TenantConfig } from '../src/tenant-registry.js';
 import { CognitoWorkforceAccountProvisioner } from '../src/workforce-accounts.js';
@@ -225,4 +225,53 @@ test('a website booking appears in the activity feed without any patient detail'
   for(const detail of [patient.firstName,patient.lastName,patient.phone,patient.email,patient.message,'cracked molar','Emergency dentistry']) {
     assert.equal(everything.includes(detail),false,`feed must not contain "${detail}"`);
   }
+});
+
+// Networks: one organization, many clinics, and staff who work at one clinic or all of them.
+test('adding a clinic gives it its own booking link and audits it',async()=>{
+  const added:{key:string;locationId:string;clinicName:string}[]=[];
+  const registry={list:async()=>[tenant],addBookingClinic:async(_org:string,clinic:{key:string;locationId:string;clinicName:string})=>{ added.push(clinic); }};
+  const result=await createClinic(registry as never,pools,actor,orgId,{name:'Clinic C',address:'3 Third St'});
+  assert.equal(added[0]?.locationId,result.locationId);
+  assert.match(added[0]?.key??'',/^[A-Za-z0-9_-]{20,128}$/,'a booking key the public route accepts');
+  assert.ok((await listClinics(tenant,pools,orgId)).some((clinic:{name:string})=>clinic.name==='Clinic C'));
+  assert.ok((await auditRows(orgId)).some(row=>row.action==='clinics.create' && row.target_label==='Clinic C'));
+  await assert.rejects(createClinic(registry as never,pools,actor,orgId,{name:'clinic c'}),/already has a clinic with that name/);
+});
+
+test('renaming a clinic updates the booking registry the public page reads from',async()=>{
+  const clinics=await listClinics(tenant,pools,orgId) as {location_id:string;name:string}[];
+  const target=clinics.find(clinic=>clinic.name==='Clinic C')!;
+  const renamed:{locationId:string;clinicName:string}[]=[];
+  const registry={list:async()=>[{...tenant,bookingClinics:[{key:'x'.repeat(24),locationId:target.location_id,clinicName:'Clinic C',timezone:'America/New_York'}]}],updateBookingClinic:async(_org:string,locationId:string,changes:{clinicName:string})=>{ renamed.push({locationId,...changes}); }};
+  await updateClinic(registry as never,pools,actor,orgId,target.location_id,{name:'Clinic C Renamed',address:'3 Third St',timezone:'America/Chicago'});
+  assert.deepEqual(renamed,[{locationId:target.location_id,clinicName:'Clinic C Renamed',timezone:'America/Chicago'}]);
+});
+
+test('the last clinic in service cannot be taken out of service',async()=>{
+  const clinics=await listClinics(tenant,pools,orgId) as {location_id:string;status:string}[];
+  const active=clinics.filter(clinic=>clinic.status==='active');
+  for(const clinic of active.slice(1)) await setClinicStatus(tenant,pools,actor,orgId,clinic.location_id,{status:'inactive'});
+  await assert.rejects(setClinicStatus(tenant,pools,actor,orgId,active[0]!.location_id,{status:'inactive'}),/only active clinic/);
+  for(const clinic of active.slice(1)) await setClinicStatus(tenant,pools,actor,orgId,clinic.location_id,{status:'active'});
+  assert.ok((await auditRows(orgId)).some(row=>row.action==='clinics.deactivate'));
+});
+
+test('staff assigned to one clinic work only there, and an edit that omits the clinic does not widen it',async()=>{
+  const assignee=randomUUID(), sub=`assign.${run}`;
+  const root=new Client({connectionString}); await root.connect();
+  try {
+    await root.query('INSERT INTO clinical.users(id,organization_id,cognito_sub,email,name,status) VALUES($1,$2,$3,$4,$5,$6)',[assignee,orgId,sub,`${sub}@example.test`,'Assigned Person','active']);
+    await root.query("INSERT INTO clinical.user_roles(organization_id,user_id,role) VALUES($1,$2,'front_desk')",[orgId,assignee]);
+  } finally { await root.end(); }
+  const names=async()=>(await listStaffWorkspaces(appPool,orgId,[sub])).map(item=>item.locationName).sort();
+  assert.ok((await names()).length>=2,'starts with every clinic');
+  await updatePlatformStaff(tenant,pools,actor,orgId,assignee,{name:'Assigned Person',email:`${sub}@example.test`,role:'front_desk',locationId:clinicB});
+  assert.deepEqual(await names(),['Clinic B']);
+  // An edit that never mentions a clinic, such as one from the previous portal during a deploy.
+  await updatePlatformStaff(tenant,pools,actor,orgId,assignee,{name:'Assigned Person Renamed',email:`${sub}@example.test`,role:'front_desk'});
+  assert.deepEqual(await names(),['Clinic B'],'still only Clinic B');
+  await assert.rejects(updatePlatformStaff(tenant,pools,actor,orgId,assignee,{name:'Assigned Person',email:`${sub}@example.test`,role:'front_desk',locationId:randomUUID()}),/Clinic assignment is invalid/);
+  await updatePlatformStaff(tenant,pools,actor,orgId,assignee,{name:'Assigned Person',email:`${sub}@example.test`,role:'front_desk',locationId:null});
+  assert.ok((await names()).length>=2,'null means every clinic again');
 });

@@ -18,7 +18,7 @@ import { completeDocument, createDocumentUpload, listDocuments, patientDocumentO
 import { CognitoPatientAccountProvisioner, savePatientInvite, type PatientAccountProvisioner } from './patient-accounts.js';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { assignableRoles, createPlatformClient, createPlatformStaff, deleteOrganization, deleteStaff, listPlatformAccess, listPlatformActivity, listPlatformClients, organizationRecords, setOrganizationStatus, setUserStatus, staffRecords, updatePlatformStaff, type PlatformActor } from './platform-admin.js';
+import { assignableRoles, createClinic, createPlatformClient, createPlatformStaff, deleteOrganization, deleteStaff, listClinics, listPlatformAccess, listPlatformActivity, listPlatformClients, organizationRecords, setClinicStatus, setOrganizationStatus, setUserStatus, staffRecords, updateClinic, updatePlatformStaff, type PlatformActor } from './platform-admin.js';
 import { CognitoWorkforceAccountProvisioner, type WorkforceAccountProvisioner } from './workforce-accounts.js';
 
 const requestScope=z.object({organizationId:z.string().uuid(),locationId:z.string().uuid()});
@@ -157,6 +157,21 @@ export function createHealthcareServer(platform:Platform):Server {
         if(request.method==='GET'&&orgRecordsMatch?.[1]) {
           const tenant=tenants.find(item=>item.organizationId===orgRecordsMatch[1])??tenants[0]; if(!tenant) throw new AccessError(404);
           return send(response,200,{records:await organizationRecords(tenant,platform.pools,orgRecordsMatch[1])});
+        }
+        // Clinics in an organization's network.
+        const clinicsMatch=path.match(/^\/v1\/admin\/clients\/([0-9a-f-]{36})\/clinics$/i);
+        if(clinicsMatch?.[1]) {
+          const tenant=tenants.find(item=>item.organizationId===clinicsMatch[1]); if(!tenant) throw new AccessError(404,'Organization is not connected');
+          if(request.method==='GET') return send(response,200,{clinics:await listClinics(tenant,platform.pools,clinicsMatch[1])});
+          if(request.method==='POST') return send(response,201,{clinic:await createClinic(platform.registry,platform.pools,actor,clinicsMatch[1],await body(request))});
+        }
+        const clinicMatch=path.match(/^\/v1\/admin\/clients\/([0-9a-f-]{36})\/clinics\/([0-9a-f-]{36})$/i);
+        if(request.method==='PATCH'&&clinicMatch?.[1]&&clinicMatch[2]) {
+          const tenant=tenants.find(item=>item.organizationId===clinicMatch[1]); if(!tenant) throw new AccessError(404,'Organization is not connected');
+          const payload=await body(request) as Record<string,unknown>;
+          // A status change and an edit of the clinic's details are separate actions with separate audit entries.
+          if(payload&&typeof payload==='object'&&'status' in payload) return send(response,200,{clinic:await setClinicStatus(tenant,platform.pools,actor,clinicMatch[1],clinicMatch[2],payload)});
+          return send(response,200,{clinic:await updateClinic(platform.registry,platform.pools,actor,clinicMatch[1],clinicMatch[2],payload)});
         }
         const staffRecordsMatch=path.match(/^\/v1\/admin\/access\/([0-9a-f-]{36})\/([0-9a-f-]{36})\/records$/i);
         if(request.method==='GET'&&staffRecordsMatch?.[1]&&staffRecordsMatch[2]) {

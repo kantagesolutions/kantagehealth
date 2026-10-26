@@ -86,7 +86,9 @@ export async function setUserStatus(tenant:TenantConfig,pools:TenantPoolRegistry
 }
 const newClient=z.object({slug:z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}$/),name:z.string().trim().min(2).max(160),clinicName:z.string().trim().min(2).max(160),timezone:z.string().trim().min(2).max(100).default('America/New_York'),address:z.string().trim().max(300).default('')}).strict();
 const newStaff=z.object({organizationId:z.string().uuid(),username:z.string().trim().toLowerCase().regex(/^[a-z0-9][a-z0-9._-]{2,63}$/),email:z.string().email(),name:z.string().trim().min(2).max(160),role:z.enum(assignableRoles),locationId:z.string().uuid().optional()}).strict();
-const staffUpdate=z.object({name:z.string().trim().min(2).max(160),email:z.string().email(),role:z.enum(assignableRoles)}).strict();
+// locationId: one clinic, or null for every clinic in the organization. Left out, the current assignment
+// is kept: an edit that never mentions a clinic must not widen anyone's access to every clinic.
+const staffUpdate=z.object({name:z.string().trim().min(2).max(160),email:z.string().email(),role:z.enum(assignableRoles),locationId:z.string().uuid().nullable().optional()}).strict();
 
 export async function createPlatformClient(registry:TenantRegistry,pools:TenantPoolRegistry,actor:PlatformActor,input:unknown){
   const request=newClient.parse(input); const [template]=await registry.list();
@@ -123,13 +125,15 @@ export async function createPlatformStaff(tenants:TenantConfig[],pools:TenantPoo
 export async function updatePlatformStaff(tenant:TenantConfig,pools:TenantPoolRegistry,actor:PlatformActor,organizationId:string,userId:string,input:unknown){
   const request=staffUpdate.parse(input); const org=z.string().uuid().parse(organizationId),user=z.string().uuid().parse(userId);
   return audited(await pools.get(tenant),actor,async client=>{
-    const result=await client.query<{previous_name:string;previous_email:string;previous_roles:string[]}>('SELECT * FROM clinical.platform_update_staff($1,$2,$3,$4,$5)',[org,user,request.name,request.email,request.role]);
+    const locationId=request.locationId!==undefined?request.locationId:(await client.query<{location_id:string|null}>('SELECT location_id FROM clinical.platform_access() WHERE organization_id=$1 AND user_id=$2',[org,user])).rows[0]?.location_id??null;
+    const result=await client.query<{previous_name:string;previous_email:string;previous_roles:string[];previous_clinic:string}>('SELECT * FROM clinical.platform_update_staff_profile($1,$2,$3,$4,$5,$6)',[org,user,request.name,request.email,request.role,locationId]);
     const previous=result.rows[0]; if(!previous) throw new Error('Staff member not found');
+    const clinic=locationId?(await client.query<{name:string}>('SELECT name FROM clinical.platform_clinics($1) WHERE location_id=$2',[org,locationId])).rows[0]?.name??'':'All clinics';
     return {
-      result:{organizationId:org,userId:user,name:request.name,email:request.email.trim().toLowerCase(),role:request.role},
+      result:{organizationId:org,userId:user,name:request.name,email:request.email.trim().toLowerCase(),role:request.role,locationId,clinic},
       activity:{action:'staff.update',organizationId:org,targetType:'staff',targetId:user,targetLabel:request.name,metadata:{
-        previous:{name:previous.previous_name,email:previous.previous_email,roles:previous.previous_roles},
-        next:{name:request.name,email:request.email.trim().toLowerCase(),role:request.role},
+        previous:{name:previous.previous_name,email:previous.previous_email,roles:previous.previous_roles,clinic:previous.previous_clinic},
+        next:{name:request.name,email:request.email.trim().toLowerCase(),role:request.role,clinic},
       }},
     };
   });
@@ -171,5 +175,50 @@ export async function deleteStaff(tenant:TenantConfig,pools:TenantPoolRegistry,a
   return audited(await pools.get(tenant),actor,async client=>{
     const result=await client.query<{name:string}>('SELECT clinical.platform_delete_staff($1,$2) AS name',[org,user]);
     return {result:{organizationId:org,userId:user,deleted:true},activity:{action:'staff.delete',organizationId:org,targetType:'staff',targetId:user,targetLabel:result.rows[0]?.name??''}};
+  });
+}
+
+// A dental network: one organization, many clinics. Each clinic gets its own booking link in the tenant
+// registry, written before commit so a registry failure leaves the clinic uncreated.
+const clinicInput=z.object({name:z.string().trim().min(2).max(160),timezone:z.string().trim().min(2).max(100).default('America/New_York'),address:z.string().trim().max(300).default('')}).strict();
+const clinicStatus=z.object({status:z.enum(['active','inactive'])}).strict();
+export async function listClinics(tenant:TenantConfig,pools:TenantPoolRegistry,organizationId:string){
+  const org=z.string().uuid().parse(organizationId);
+  const result=await (await pools.get(tenant)).query('SELECT * FROM clinical.platform_clinics($1)',[org]);
+  return result.rows;
+}
+export async function createClinic(registry:TenantRegistry,pools:TenantPoolRegistry,actor:PlatformActor,organizationId:string,input:unknown){
+  const org=z.string().uuid().parse(organizationId); const request=clinicInput.parse(input);
+  const tenant=(await registry.list()).find(item=>item.organizationId===org); if(!tenant) throw new Error('Organization is not connected');
+  return audited(await pools.get(tenant),actor,async client=>{
+    const result=await client.query<{location_id:string;clinic_name:string}>('SELECT * FROM clinical.platform_create_location($1,$2,$3,$4)',[org,request.name,request.timezone,request.address]);
+    const created=result.rows[0]; if(!created) throw new Error('Clinic could not be created');
+    const key=randomBytes(32).toString('base64url');
+    await registry.addBookingClinic(org,{key,locationId:created.location_id,clinicName:created.clinic_name,timezone:request.timezone});
+    return {
+      result:{organizationId:org,locationId:created.location_id,name:created.clinic_name,bookingUrl:`/v1/public/booking/${key}`},
+      activity:{action:'clinics.create',organizationId:org,targetType:'clinic',targetId:created.location_id,targetLabel:created.clinic_name},
+    };
+  });
+}
+export async function updateClinic(registry:TenantRegistry,pools:TenantPoolRegistry,actor:PlatformActor,organizationId:string,locationId:string,input:unknown){
+  const org=z.string().uuid().parse(organizationId),loc=z.string().uuid().parse(locationId); const request=clinicInput.parse(input);
+  const tenant=(await registry.list()).find(item=>item.organizationId===org); if(!tenant) throw new Error('Organization is not connected');
+  return audited(await pools.get(tenant),actor,async client=>{
+    const result=await client.query<{previous_name:string;previous_timezone:string;previous_address:string}>('SELECT * FROM clinical.platform_update_location($1,$2,$3,$4,$5)',[org,loc,request.name,request.timezone,request.address]);
+    const previous=result.rows[0]; if(!previous) throw new Error('Clinic not found');
+    // Keep the public booking page in step with the new name and timezone.
+    if(tenant.bookingClinics.some(item=>item.locationId===loc)) await registry.updateBookingClinic(org,loc,{clinicName:request.name,timezone:request.timezone});
+    return {
+      result:{organizationId:org,locationId:loc,...request},
+      activity:{action:'clinics.update',organizationId:org,targetType:'clinic',targetId:loc,targetLabel:request.name,metadata:{previous:{name:previous.previous_name,timezone:previous.previous_timezone,address:previous.previous_address},next:request}},
+    };
+  });
+}
+export async function setClinicStatus(tenant:TenantConfig,pools:TenantPoolRegistry,actor:PlatformActor,organizationId:string,locationId:string,input:unknown){
+  const org=z.string().uuid().parse(organizationId),loc=z.string().uuid().parse(locationId); const {status}=clinicStatus.parse(input);
+  return audited(await pools.get(tenant),actor,async client=>{
+    const result=await client.query<{name:string}>('SELECT clinical.platform_set_location_status($1,$2,$3) AS name',[org,loc,status]);
+    return {result:{organizationId:org,locationId:loc,status},activity:{action:status==='active'?'clinics.activate':'clinics.deactivate',organizationId:org,targetType:'clinic',targetId:loc,targetLabel:result.rows[0]?.name??''}};
   });
 }

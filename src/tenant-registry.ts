@@ -42,6 +42,25 @@ export class TenantRegistry {
     await this.client.send(new PutSecretValueCommand({SecretId:this.registrySecretId,SecretString:JSON.stringify({tenants:remaining})}));
     tenants.delete(organizationId);
   }
+  // Each clinic has its own booking link. The public booking page reads the clinic's name and timezone
+  // from here, so a rename must reach the registry as well as the database.
+  async addBookingClinic(organizationId:string,clinic:BookingClinic):Promise<void> {
+    await this.replaceBookingClinics(organizationId,clinics=>{
+      if(clinics.some(item=>item.locationId===clinic.locationId)) throw new Error('This clinic already has a booking link');
+      return [...clinics,clinic];
+    });
+  }
+  async updateBookingClinic(organizationId:string,locationId:string,changes:{clinicName:string;timezone:string}):Promise<void> {
+    await this.replaceBookingClinics(organizationId,clinics=>clinics.map(item=>item.locationId===locationId?{...item,...changes}:item));
+  }
+  private async replaceBookingClinics(organizationId:string,change:(clinics:BookingClinic[])=>BookingClinic[]):Promise<void> {
+    const tenants=await (this.#cache ??= this.load());
+    const tenant=tenants.get(organizationId);
+    if(!tenant) throw new Error('Organization is not connected');
+    const updated={...tenant,bookingClinics:change(tenant.bookingClinics)};
+    await this.client.send(new PutSecretValueCommand({SecretId:this.registrySecretId,SecretString:JSON.stringify({tenants:[...tenants.values()].map(item=>item.organizationId===organizationId?updated:item)})}));
+    tenants.set(organizationId,updated);
+  }
   private async load():Promise<Map<string,TenantConfig>> {
     const result=await this.client.send(new GetSecretValueCommand({SecretId:this.registrySecretId}));
     if(!result.SecretString) throw new Error('Healthcare tenant registry is unavailable');
