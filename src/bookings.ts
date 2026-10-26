@@ -3,12 +3,26 @@ import { AccessError, audit, context, query, requireCapability } from './context
 
 export async function listBookingInquiries(){
   requireCapability('schedule.read');
+  // A possible match may be a patient at another clinic in the organization, which row-level security
+  // hides from this clinic, so its name comes from a definer function limited to this clinic's requests.
   const result=await query(`SELECT b.id,b.patient_id,b.appointment_type,b.preferred_date,b.preferred_time,b.preferred_contact,b.message,b.status,b.activation_status,b.created_at,
-    p.first_name,p.last_name,p.phone,p.email
+    p.first_name,p.last_name,p.phone,p.email,m.match_name,m.match_clinic,m.matched_on
     FROM clinical.booking_inquiries b JOIN clinical.patients p ON p.organization_id=b.organization_id AND p.id=b.patient_id
+    LEFT JOIN clinical.booking_possible_matches() m ON m.inquiry_id=b.id
     ORDER BY CASE b.status WHEN 'new' THEN 0 WHEN 'contacted' THEN 1 ELSE 2 END,b.created_at DESC LIMIT 200`);
   await audit('bookings.read','booking_inquiry');
   return result.rows;
+}
+
+const matchInput=z.object({samePatient:z.boolean()}).strict();
+// Staff decide whether a booking that only partly matched an existing patient is that patient.
+export async function resolveBookingMatch(id:string,input:unknown){
+  requireCapability('patients.edit');
+  const bookingId=z.string().uuid().parse(id);
+  const {samePatient}=matchInput.parse(input);
+  const result=await query<{patient_id:string}>('SELECT clinical.resolve_booking_match($1,$2) AS patient_id',[bookingId,samePatient]);
+  await audit(samePatient?'bookings.match_confirmed':'bookings.match_dismissed','booking_inquiry',bookingId);
+  return {id:bookingId,patientId:result.rows[0]?.patient_id,samePatient};
 }
 
 const scheduleInput=z.object({startTime:z.iso.datetime({offset:true}),durationMinutes:z.number().int().min(5).max(480)}).strict();
