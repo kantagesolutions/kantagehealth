@@ -189,3 +189,6 @@
 .status[data-status="archived"] i{background:#c4ccd4}
 .status[data-status="archived"]{color:#8796a6}
 @media (min-width:701px){.directory-head,.admin-live-portal .directory-panel .admin-client-row{grid-template-columns:46px minmax(210px,1fr) 70px 70px 75px 95px 214px;min-width:870px}.directory-panel .row-actions{flex-wrap:nowrap}}
+.possible-match{display:grid;gap:8px;margin-top:8px;padding:10px 12px;border:1px solid #f3d38a;border-radius:8px;background:#fffaeb;color:#5c4813;font-size:13px;line-height:1.45}
+.possible-match-actions{display:flex;flex-wrap:wrap;gap:8px}
+.possible-match-actions .secondary{height:34px;padding:0 12px;font-size:13px}

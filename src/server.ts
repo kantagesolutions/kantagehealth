@@ -13,7 +13,7 @@ import { staffVerifier, verifyStaffToken } from './auth.js';
 import { productionRegistry, staffClientIds, TenantPoolRegistry, type TenantConfig, type TenantRegistry } from './tenant-registry.js';
 import { createPublicBookingInquiry } from './public-booking.js';
 import { listStaffWorkspaces } from './workspaces.js';
-import { listBookingInquiries, scheduleBookingInquiry } from './bookings.js';
+import { listBookingInquiries, resolveBookingMatch, scheduleBookingInquiry } from './bookings.js';
 import { completeDocument, createDocumentUpload, listDocuments, patientDocumentObject } from './documents.js';
 import { CognitoPatientAccountProvisioner, savePatientInvite, type PatientAccountProvisioner } from './patient-accounts.js';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
@@ -212,6 +212,11 @@ export function createHealthcareServer(platform:Platform):Server {
       if(bookingScheduleMatch?.[1] && request.method==='POST') {
         const payload=await body(request);
         return send(response,200,{appointment:await scoped(pool,requestScopeData,()=>scheduleBookingInquiry(bookingScheduleMatch[1]!,payload))});
+      }
+      const bookingMatchMatch=path.match(/^\/v1\/booking-inquiries\/([0-9a-f-]{36})\/match$/i);
+      if(bookingMatchMatch?.[1] && request.method==='POST') {
+        const payload=await body(request);
+        return send(response,200,{booking:await scoped(pool,requestScopeData,()=>resolveBookingMatch(bookingMatchMatch[1]!,payload))});
       }
       if(request.method==='POST' && path==='/v1/appointments') {
         const payload=await body(request);
