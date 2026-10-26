@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import test, { after, before } from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { Client, Pool } from 'pg';
-import { createPlatformClient, setUserStatus, updatePlatformStaff } from '../src/platform-admin.js';
+import { createPlatformClient, deleteOrganization, deleteStaff, organizationRecords, setOrganizationStatus, setUserStatus, staffRecords, updatePlatformStaff } from '../src/platform-admin.js';
 import { registrySecretIdFrom, TenantRegistry, type TenantConfig } from '../src/tenant-registry.js';
 import { CognitoWorkforceAccountProvisioner } from '../src/workforce-accounts.js';
 import { listStaffWorkspaces } from '../src/workspaces.js';
@@ -157,4 +157,56 @@ test('a new organization and its audit entry are committed together',async()=>{
   const entry=(await auditRows(result.organizationId)).find(row=>row.action==='organizations.create');
   assert.equal(entry?.actor,'test.admin');
   assert.equal(entry?.target_label,'Created Org');
+});
+
+// Lifecycle: deleting is permanent only when nothing must be kept; anything else is archived.
+
+test('an empty organization is deleted permanently, its registry entry removed, and the deletion audited',async()=>{
+  let removed:string|undefined;
+  const registry={list:async()=>[tenant],add:async()=>undefined,remove:async(id:string)=>{ removed=id; }};
+  const created=await createPlatformClient(registry as never,pools,actor,{slug:`empty-${run}`,name:'Empty Org',clinicName:'Empty Clinic'});
+  assert.equal((await organizationRecords(tenant,pools,created.organizationId)).deletable,true);
+  await deleteOrganization(registry as never,pools,actor,created.organizationId);
+  assert.equal(removed,created.organizationId);
+  const root=new Client({connectionString}); await root.connect();
+  try {
+    assert.equal((await root.query('SELECT 1 FROM clinical.organizations WHERE id=$1',[created.organizationId])).rowCount,0);
+    // The creation entry survives with its reference cleared, and the deletion itself is recorded.
+    const entries=(await root.query<{action:string;organization_id:string|null;target_label:string}>('SELECT action,organization_id,target_label FROM clinical.platform_audit_log WHERE target_id=$1 ORDER BY id',[created.organizationId])).rows;
+    assert.deepEqual(entries.map(entry=>entry.action),['organizations.create','organizations.delete']);
+    assert.ok(entries.every(entry=>entry.organization_id===null && entry.target_label==='Empty Org'));
+  } finally { await root.end(); }
+});
+
+test('an organization with records cannot be deleted, keeps its registry entry, and can be archived and restored',async()=>{
+  let removed=false;
+  const registry={list:async()=>[tenant],remove:async()=>{ removed=true; }};
+  // The fixture organization has staff, so it must be kept.
+  assert.equal((await organizationRecords(tenant,pools,orgId)).deletable,false);
+  await assert.rejects(deleteOrganization(registry as never,pools,actor,orgId),/must be kept/);
+  assert.equal(removed,false);
+  await setOrganizationStatus(tenant,pools,actor,orgId,{status:'archived'});
+  assert.equal((await auditRows(orgId)).at(-1)?.action,'organizations.archive');
+  await setOrganizationStatus(tenant,pools,actor,orgId,{status:'active'});
+  assert.equal((await auditRows(orgId)).at(-1)?.action,'organizations.activate');
+});
+
+test('a staff member who never acted is deleted; one with activity can only be archived',async()=>{
+  const root=new Client({connectionString}); await root.connect();
+  const idle=randomUUID(), busy=randomUUID();
+  try {
+    await root.query('INSERT INTO clinical.users(id,organization_id,cognito_sub,email,name,status) VALUES($1,$3,$4,$5,$6,$7),($2,$3,$8,$9,$10,$7)',[idle,busy,orgId,`idle.${run}`,`idle.${run}@example.test`,'Idle Person','active',`busy.${run}`,`busy.${run}@example.test`,'Busy Person']);
+    await root.query('INSERT INTO clinical.user_roles(organization_id,user_id,role) VALUES($1,$2,$3),($1,$4,$3)',[orgId,idle,'front_desk',busy]);
+    await root.query('INSERT INTO clinical.audit_log(organization_id,location_id,actor_user_id,actor_role,action,subject_type) VALUES($1,$2,$3,$4,$5,$6)',[orgId,clinicA,busy,'front_desk','patients.read','patient']);
+  } finally { await root.end(); }
+  assert.equal((await staffRecords(tenant,pools,orgId,idle)).deletable,true);
+  assert.equal((await staffRecords(tenant,pools,orgId,busy)).deletable,false);
+  await deleteStaff(tenant,pools,actor,orgId,idle);
+  await assert.rejects(deleteStaff(tenant,pools,actor,orgId,busy),/must be kept/);
+  const check=new Client({connectionString}); await check.connect();
+  try {
+    assert.equal((await check.query('SELECT 1 FROM clinical.users WHERE id=$1',[idle])).rowCount,0);
+    assert.equal((await check.query('SELECT 1 FROM clinical.audit_log WHERE actor_user_id=$1',[busy])).rowCount,1);
+  } finally { await check.end(); }
+  assert.ok((await auditRows(orgId)).some(row=>row.action==='staff.delete' && row.target_label==='Idle Person'));
 });

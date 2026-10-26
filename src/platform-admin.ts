@@ -48,8 +48,10 @@ export async function listPlatformAccess(tenants:TenantConfig[],pools:TenantPool
   }
   return rows;
 }
-const orgStatus=z.object({status:z.enum(['active','suspended'])}).strict();
-const userStatus=z.object({status:z.enum(['active','inactive'])}).strict();
+const orgStatus=z.object({status:z.enum(['active','suspended','archived'])}).strict();
+const userStatus=z.object({status:z.enum(['active','inactive','archived'])}).strict();
+const orgStatusAction={active:'organizations.activate',suspended:'organizations.suspend',archived:'organizations.archive'} as const;
+const userStatusAction={active:'staff.activate',inactive:'staff.deactivate',archived:'staff.archive'} as const;
 
 // Names for the audit trail come from the definer listing functions, because the request role
 // cannot read these tables directly without a tenant scope.
@@ -68,7 +70,7 @@ export async function setOrganizationStatus(tenant:TenantConfig,pools:TenantPool
     const result=await client.query<{updated:boolean}>('SELECT clinical.platform_set_organization_status($1,$2) AS updated',[organizationId,status]);
     return {
       result:{organizationId,status,updated:Boolean(result.rows[0]?.updated)},
-      activity:{action:status==='active'?'organizations.activate':'organizations.suspend',organizationId,targetType:'organization',targetId:organizationId,targetLabel:await organizationName(client,organizationId)},
+      activity:{action:orgStatusAction[status],organizationId,targetType:'organization',targetId:organizationId,targetLabel:await organizationName(client,organizationId)},
     };
   });
 }
@@ -78,7 +80,7 @@ export async function setUserStatus(tenant:TenantConfig,pools:TenantPoolRegistry
     const result=await client.query<{updated:boolean}>('SELECT clinical.platform_set_user_status($1,$2,$3) AS updated',[org,user,status]);
     return {
       result:{organizationId:org,userId:user,status,updated:Boolean(result.rows[0]?.updated)},
-      activity:{action:status==='active'?'staff.activate':'staff.deactivate',organizationId:org,targetType:'staff',targetId:user,targetLabel:await staffName(client,org,user)},
+      activity:{action:userStatusAction[status],organizationId:org,targetType:'staff',targetId:user,targetLabel:await staffName(client,org,user)},
     };
   });
 }
@@ -130,5 +132,44 @@ export async function updatePlatformStaff(tenant:TenantConfig,pools:TenantPoolRe
         next:{name:request.name,email:request.email.trim().toLowerCase(),role:request.role},
       }},
     };
+  });
+}
+
+// What an organization or staff member holds that must be kept. The admin portal reads this before
+// offering a delete: nothing to keep means delete permanently, anything kept means archive instead.
+export interface OrganizationRecords { staff:number; patients:number; appointments:number; clinicalRecords:number; documents:number; billing:number; bookingRequests:number; activity:number; deletable:boolean; }
+export async function organizationRecords(tenant:TenantConfig,pools:TenantPoolRegistry,id:string):Promise<OrganizationRecords>{
+  const organizationId=z.string().uuid().parse(id);
+  const result=await (await pools.get(tenant)).query<Record<string,string>>('SELECT * FROM clinical.platform_organization_records($1)',[organizationId]);
+  const row=result.rows[0]??{};
+  const counts={staff:Number(row.staff??0),patients:Number(row.patients??0),appointments:Number(row.appointments??0),clinicalRecords:Number(row.clinical_records??0),documents:Number(row.documents??0),billing:Number(row.billing??0),bookingRequests:Number(row.booking_requests??0),activity:Number(row.activity??0)};
+  return {...counts,deletable:Object.values(counts).every(count=>count===0)};
+}
+export async function staffRecords(tenant:TenantConfig,pools:TenantPoolRegistry,organizationId:string,userId:string){
+  const org=z.string().uuid().parse(organizationId),user=z.string().uuid().parse(userId);
+  const result=await (await pools.get(tenant)).query<{activity:string}>('SELECT activity FROM clinical.platform_staff_records($1,$2)',[org,user]);
+  const activity=Number(result.rows[0]?.activity??0);
+  return {activity,deletable:activity===0};
+}
+
+// Permanent deletion. The database refuses if anything must be kept, and the organization is removed
+// from the tenant registry before commit, so a registry failure leaves everything in place.
+export async function deleteOrganization(registry:TenantRegistry,pools:TenantPoolRegistry,actor:PlatformActor,id:string){
+  const organizationId=z.string().uuid().parse(id); const [template]=await registry.list();
+  if(!template) throw new Error('No configured platform database is available');
+  return audited(await pools.get(template),actor,async client=>{
+    const result=await client.query<{name:string}>('SELECT clinical.platform_delete_organization($1) AS name',[organizationId]);
+    const name=result.rows[0]?.name??'';
+    await registry.remove(organizationId);
+    // The organization no longer exists, so the entry cannot reference it. Its id and name are kept in
+    // the target fields, which have no foreign key, and its earlier entries had their reference cleared.
+    return {result:{organizationId,deleted:true},activity:{action:'organizations.delete',organizationId:null,targetType:'organization',targetId:organizationId,targetLabel:name}};
+  });
+}
+export async function deleteStaff(tenant:TenantConfig,pools:TenantPoolRegistry,actor:PlatformActor,organizationId:string,userId:string){
+  const org=z.string().uuid().parse(organizationId),user=z.string().uuid().parse(userId);
+  return audited(await pools.get(tenant),actor,async client=>{
+    const result=await client.query<{name:string}>('SELECT clinical.platform_delete_staff($1,$2) AS name',[org,user]);
+    return {result:{organizationId:org,userId:user,deleted:true},activity:{action:'staff.delete',organizationId:org,targetType:'staff',targetId:user,targetLabel:result.rows[0]?.name??''}};
   });
 }
