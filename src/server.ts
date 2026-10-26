@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
@@ -17,7 +18,7 @@ import { completeDocument, createDocumentUpload, listDocuments, patientDocumentO
 import { CognitoPatientAccountProvisioner, savePatientInvite, type PatientAccountProvisioner } from './patient-accounts.js';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { createPlatformClient, createPlatformStaff, listPlatformAccess, listPlatformActivity, listPlatformClients, setOrganizationStatus, setUserStatus } from './platform-admin.js';
+import { assignableRoles, createPlatformClient, createPlatformStaff, listPlatformAccess, listPlatformActivity, listPlatformClients, setOrganizationStatus, setUserStatus, updatePlatformStaff, type PlatformActor } from './platform-admin.js';
 import { CognitoWorkforceAccountProvisioner, type WorkforceAccountProvisioner } from './workforce-accounts.js';
 
 const requestScope=z.object({organizationId:z.string().uuid(),locationId:z.string().uuid()});
@@ -127,31 +128,41 @@ export function createHealthcareServer(platform:Platform):Server {
       }
       if(path.startsWith('/v1/admin/')) {
         const bearer=token(request); const tenants=await platform.registry.list(); let accepted=false;
+        let actor:PlatformActor|undefined;
         for(const tenant of tenants){
           try {
             const claims=await verifyStaffToken(bearer,workforceAuth(platform,tenant),workforceVerifier(platform,tenant));
             const groups=(claims as Record<string,unknown>)['cognito:groups'];
-            if(Array.isArray(groups)&&groups.includes('platform_admin')) { accepted=true; break; }
+            // Keep the verified identity: every administrator change is recorded against it.
+            if(Array.isArray(groups)&&groups.includes('platform_admin')) { actor={username:workforceIdentity(claims)}; break; }
           } catch(error) { if(error instanceof Error&&error.message==='Unauthorized') continue; throw error; }
         }
-        if(!accepted) throw new AccessError(403);
+        if(!actor) throw new AccessError(403);
         if(request.method==='GET'&&path==='/v1/admin/clients') return send(response,200,{clients:await listPlatformClients(tenants,platform.pools)});
         if(request.method==='GET'&&path==='/v1/admin/access') return send(response,200,{users:await listPlatformAccess(tenants,platform.pools)});
         if(request.method==='GET'&&path==='/v1/admin/activity') return send(response,200,{activity:await listPlatformActivity(tenants,platform.pools)});
-        if(request.method==='POST'&&path==='/v1/admin/clients') return send(response,201,{client:await createPlatformClient(platform.registry,platform.pools,await body(request))});
+        if(request.method==='GET'&&path==='/v1/admin/roles') return send(response,200,{roles:assignableRoles});
+        if(request.method==='POST'&&path==='/v1/admin/clients') return send(response,201,{client:await createPlatformClient(platform.registry,platform.pools,actor,await body(request))});
         if(request.method==='POST'&&path==='/v1/admin/staff') {
           if(!platform.workforceAccounts) throw new Error('Workforce onboarding is unavailable');
-          return send(response,201,{staff:await createPlatformStaff(tenants,platform.pools,platform.workforceAccounts,await body(request))});
+          return send(response,201,{staff:await createPlatformStaff(tenants,platform.pools,platform.workforceAccounts,actor,await body(request))});
         }
         const orgMatch=path.match(/^\/v1\/admin\/clients\/([0-9a-f-]{36})$/i);
         if(request.method==='PATCH'&&orgMatch?.[1]) {
           const tenant=tenants.find(item=>item.organizationId===orgMatch[1])??tenants[0]; if(!tenant) throw new AccessError(404);
-          return send(response,200,{client:await setOrganizationStatus(tenant,platform.pools,orgMatch[1],await body(request))});
+          return send(response,200,{client:await setOrganizationStatus(tenant,platform.pools,actor,orgMatch[1],await body(request))});
+        }
+        // Editing has its own path so the status route keeps its meaning for the version still serving
+        // while a deploy rolls out.
+        const profileMatch=path.match(/^\/v1\/admin\/access\/([0-9a-f-]{36})\/([0-9a-f-]{36})\/profile$/i);
+        if(request.method==='PATCH'&&profileMatch?.[1]&&profileMatch[2]) {
+          const tenant=tenants.find(item=>item.organizationId===profileMatch[1])??tenants[0]; if(!tenant) throw new AccessError(404);
+          return send(response,200,{user:await updatePlatformStaff(tenant,platform.pools,actor,profileMatch[1],profileMatch[2],await body(request))});
         }
         const userMatch=path.match(/^\/v1\/admin\/access\/([0-9a-f-]{36})\/([0-9a-f-]{36})$/i);
         if(request.method==='PATCH'&&userMatch?.[1]&&userMatch[2]) {
           const tenant=tenants.find(item=>item.organizationId===userMatch[1])??tenants[0]; if(!tenant) throw new AccessError(404);
-          return send(response,200,{user:await setUserStatus(tenant,platform.pools,userMatch[1],userMatch[2],await body(request))});
+          return send(response,200,{user:await setUserStatus(tenant,platform.pools,actor,userMatch[1],userMatch[2],await body(request))});
         }
         return send(response,404,{error:'Not found'});
       }
@@ -234,7 +245,16 @@ export function createHealthcareServer(platform:Platform):Server {
       if(error instanceof ZodError) return send(response,400,{error:'Invalid request'});
       if(error instanceof AccessError) return send(response,error.status,{error:error.message});
       if(error instanceof Error && error.message==='Unauthorized') return send(response,401,{error:'Unauthorized'});
-      return send(response,503,{error:'Service unavailable'});
+      // Messages raised by our own SQL functions are fixed strings written for people, never data.
+      const databaseCode=(error as {code?:unknown}).code;
+      if(databaseCode==='P0001' && error instanceof Error) return send(response,400,{error:error.message});
+      if(databaseCode==='23505') return send(response,409,{error:'That already exists.'});
+      // Anything else is unexpected. Record the real cause so it can be found, and hand back an id that
+      // ties the user's report to the log line. Only the method and query-free path are logged: query
+      // strings and bodies can carry patient details.
+      const requestId=randomUUID();
+      console.error(JSON.stringify({level:'error',requestId,method:request.method,path:(request.url??'/').split('?')[0],error:error instanceof Error?{name:error.name,message:error.message,code:databaseCode,stack:error.stack}:String(error)}));
+      return send(response,503,{error:'Service unavailable',requestId});
     }
   });
 }

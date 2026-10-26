@@ -67,8 +67,16 @@ export class TenantPoolRegistry {
   async close():Promise<void> { await Promise.all([...this.#pools.values()].map(async pool=>{(await pool).end();})); }
 }
 
+// The variable must name the registry secret, never hold its contents. ECS injects a secret's value
+// for anything declared under a task definition's `secrets`, and when this variable was declared there
+// every registry read failed and the whole platform returned 503 without a trace. Refusing to start
+// turns that mistake into a failed deploy instead.
+export function registrySecretIdFrom(value:string|undefined):string {
+  if(!value) throw new Error('KANTAGE_TENANT_REGISTRY_SECRET_ID is required');
+  if(!/^[A-Za-z0-9/_+=.@:-]{1,2048}$/.test(value)) throw new Error('KANTAGE_TENANT_REGISTRY_SECRET_ID must be the registry secret\'s ARN or name, not its contents');
+  return value;
+}
+
 export function productionRegistry():TenantRegistry {
-  const secretId=process.env.KANTAGE_TENANT_REGISTRY_SECRET_ID;
-  if(!secretId) throw new Error('KANTAGE_TENANT_REGISTRY_SECRET_ID is required');
-  return new TenantRegistry(new SecretsManagerClient({}),secretId);
+  return new TenantRegistry(new SecretsManagerClient({}),registrySecretIdFrom(process.env.KANTAGE_TENANT_REGISTRY_SECRET_ID));
 }
