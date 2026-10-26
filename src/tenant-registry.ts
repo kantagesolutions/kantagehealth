@@ -33,6 +33,15 @@ export class TenantRegistry {
     await this.client.send(new PutSecretValueCommand({SecretId:this.registrySecretId,SecretString:JSON.stringify({tenants:[...tenants.values(),tenant]})}));
     tenants.set(tenant.organizationId,tenant);
   }
+  // Removing an organization also retires its booking links. Removing one that is not registered is not
+  // an error, so a delete can be retried after a partial failure.
+  async remove(organizationId:string):Promise<void> {
+    const tenants=await (this.#cache ??= this.load());
+    if(!tenants.has(organizationId)) return;
+    const remaining=[...tenants.values()].filter(item=>item.organizationId!==organizationId);
+    await this.client.send(new PutSecretValueCommand({SecretId:this.registrySecretId,SecretString:JSON.stringify({tenants:remaining})}));
+    tenants.delete(organizationId);
+  }
   private async load():Promise<Map<string,TenantConfig>> {
     const result=await this.client.send(new GetSecretValueCommand({SecretId:this.registrySecretId}));
     if(!result.SecretString) throw new Error('Healthcare tenant registry is unavailable');

@@ -176,3 +176,16 @@
 @media (max-width:760px){.row-actions{justify-content:flex-start}.staff-edit-actions{flex-direction:column}.activity-filter{margin-top:12px}}
 .status[data-status="inactive"] i,.status[data-status="suspended"] i{background:#9aa8b5}
 .status[data-status="inactive"],.status[data-status="suspended"]{color:#66798c}
+.secondary.danger{color:#b42318;border-color:#f0b4ac}
+.secondary.danger:hover{background:#fef3f2}
+.primary.danger{background:#b42318;border-color:#b42318;box-shadow:none}
+.primary.danger:hover{background:#912018}
+.removal-panel{border-color:#f0b4ac;background:#fffbfa;box-shadow:0 10px 30px rgba(180,35,24,.08)}
+.removal-panel h2{margin:0 0 8px;font-size:20px;color:#14203a}
+.removal-panel p{margin:0 0 16px;max-width:68ch;color:#4a5b6e;line-height:1.55}
+.directory-meta{display:inline-flex;align-items:center;gap:16px}
+.archive-toggle{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:650;color:#54718c;cursor:pointer}
+.admin-section>.archive-toggle{margin:0 0 12px}
+.status[data-status="archived"] i{background:#c4ccd4}
+.status[data-status="archived"]{color:#8796a6}
+@media (min-width:701px){.directory-head,.admin-live-portal .directory-panel .admin-client-row{grid-template-columns:46px minmax(210px,1fr) 70px 70px 75px 95px 214px;min-width:870px}.directory-panel .row-actions{flex-wrap:nowrap}}

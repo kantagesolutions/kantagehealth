@@ -18,7 +18,7 @@ import { completeDocument, createDocumentUpload, listDocuments, patientDocumentO
 import { CognitoPatientAccountProvisioner, savePatientInvite, type PatientAccountProvisioner } from './patient-accounts.js';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { assignableRoles, createPlatformClient, createPlatformStaff, listPlatformAccess, listPlatformActivity, listPlatformClients, setOrganizationStatus, setUserStatus, updatePlatformStaff, type PlatformActor } from './platform-admin.js';
+import { assignableRoles, createPlatformClient, createPlatformStaff, deleteOrganization, deleteStaff, listPlatformAccess, listPlatformActivity, listPlatformClients, organizationRecords, setOrganizationStatus, setUserStatus, staffRecords, updatePlatformStaff, type PlatformActor } from './platform-admin.js';
 import { CognitoWorkforceAccountProvisioner, type WorkforceAccountProvisioner } from './workforce-accounts.js';
 
 const requestScope=z.object({organizationId:z.string().uuid(),locationId:z.string().uuid()});
@@ -33,7 +33,7 @@ function workforceIdentities(claims:{sub:string;username?:string}):string[] {
 function workforceIdentity(claims:{sub:string;username?:string}):string { return workforceIdentities(claims)[0]??claims.sub; }
 
 function send(response:ServerResponse,status:number,body:unknown){
-  response.writeHead(status,{"content-type":"application/json; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff","access-control-allow-origin":"*","access-control-allow-headers":"authorization,content-type,x-kantage-organization,x-kantage-location","access-control-allow-methods":"GET,POST,PATCH,OPTIONS"});
+  response.writeHead(status,{"content-type":"application/json; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff","access-control-allow-origin":"*","access-control-allow-headers":"authorization,content-type,x-kantage-organization,x-kantage-location","access-control-allow-methods":"GET,POST,PATCH,DELETE,OPTIONS"});
   response.end(JSON.stringify(body));
 }
 function token(request:IncomingMessage){
@@ -152,6 +152,17 @@ export function createHealthcareServer(platform:Platform):Server {
           const tenant=tenants.find(item=>item.organizationId===orgMatch[1])??tenants[0]; if(!tenant) throw new AccessError(404);
           return send(response,200,{client:await setOrganizationStatus(tenant,platform.pools,actor,orgMatch[1],await body(request))});
         }
+        if(request.method==='DELETE'&&orgMatch?.[1]) return send(response,200,{client:await deleteOrganization(platform.registry,platform.pools,actor,orgMatch[1])});
+        const orgRecordsMatch=path.match(/^\/v1\/admin\/clients\/([0-9a-f-]{36})\/records$/i);
+        if(request.method==='GET'&&orgRecordsMatch?.[1]) {
+          const tenant=tenants.find(item=>item.organizationId===orgRecordsMatch[1])??tenants[0]; if(!tenant) throw new AccessError(404);
+          return send(response,200,{records:await organizationRecords(tenant,platform.pools,orgRecordsMatch[1])});
+        }
+        const staffRecordsMatch=path.match(/^\/v1\/admin\/access\/([0-9a-f-]{36})\/([0-9a-f-]{36})\/records$/i);
+        if(request.method==='GET'&&staffRecordsMatch?.[1]&&staffRecordsMatch[2]) {
+          const tenant=tenants.find(item=>item.organizationId===staffRecordsMatch[1])??tenants[0]; if(!tenant) throw new AccessError(404);
+          return send(response,200,{records:await staffRecords(tenant,platform.pools,staffRecordsMatch[1],staffRecordsMatch[2])});
+        }
         // Editing has its own path so the status route keeps its meaning for the version still serving
         // while a deploy rolls out.
         const profileMatch=path.match(/^\/v1\/admin\/access\/([0-9a-f-]{36})\/([0-9a-f-]{36})\/profile$/i);
@@ -163,6 +174,10 @@ export function createHealthcareServer(platform:Platform):Server {
         if(request.method==='PATCH'&&userMatch?.[1]&&userMatch[2]) {
           const tenant=tenants.find(item=>item.organizationId===userMatch[1])??tenants[0]; if(!tenant) throw new AccessError(404);
           return send(response,200,{user:await setUserStatus(tenant,platform.pools,actor,userMatch[1],userMatch[2],await body(request))});
+        }
+        if(request.method==='DELETE'&&userMatch?.[1]&&userMatch[2]) {
+          const tenant=tenants.find(item=>item.organizationId===userMatch[1])??tenants[0]; if(!tenant) throw new AccessError(404);
+          return send(response,200,{user:await deleteStaff(tenant,platform.pools,actor,userMatch[1],userMatch[2])});
         }
         return send(response,404,{error:'Not found'});
       }
