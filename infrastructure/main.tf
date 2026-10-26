@@ -1044,6 +1044,11 @@ resource "aws_cognito_user_pool" "workforce" {
   mfa_configuration = var.enable_staff_mfa ? "ON" : "OFF"
   username_configuration { case_sensitive = false }
   auto_verified_attributes = ["email"]
+  # Staff and administrators are only ever invited. Without this the hosted sign-in page offers
+  # "Create an account", letting anyone on the internet register into the workforce pool.
+  admin_create_user_config {
+    allow_admin_create_user_only = true
+  }
   schema {
     name                = "email"
     attribute_data_type = "String"

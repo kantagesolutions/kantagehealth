@@ -101,6 +101,21 @@ export function hasGroup(session, group) {
   return Array.isArray(groups) && groups.includes(group);
 }
 
+// Access tokens last about an hour. Knowing when one has lapsed lets the portal ask the person to sign
+// in again, instead of showing "Access denied" over data it can no longer refresh.
+export function sessionExpired(session) {
+  if (!session?.access_token) return true;
+  try {
+    const payload = JSON.parse(atob(session.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    // A short margin so a request is not sent with a token that expires in flight.
+    return typeof payload.exp !== 'number' || payload.exp * 1000 <= Date.now() + 30_000;
+  } catch { return true; }
+}
+
+export function clearSession() {
+  sessionStorage.removeItem(tokenKey);
+}
+
 export function signOut() {
   // Clear the local session first so signing out always takes effect, even when the
   // hosted logout endpoint is unreachable or this portal is not configured yet.

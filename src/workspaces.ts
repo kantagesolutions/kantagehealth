@@ -23,7 +23,10 @@ export async function listStaffWorkspaces(pool:Pool,organizationId:string,identi
     location_address:string;
     timezone:string;
     roles:string[];
-  }>('SELECT * FROM clinical.staff_workspaces($1,$2)',[organizationId,aliases]);
+  // The cast is required. pg sends arrays untyped, and while migration 008's single-text overload
+  // existed, Postgres resolved this call to it and compared each account with the literal "{a,b}",
+  // so every staff member saw "No clinic assigned".
+  }>('SELECT * FROM clinical.staff_workspaces($1,$2::text[])',[organizationId,aliases]);
   return result.rows.map(row=>({
     organizationId:row.organization_id,
     organizationName:row.organization_name,
