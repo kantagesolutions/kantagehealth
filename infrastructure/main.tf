@@ -567,7 +567,9 @@ data "aws_iam_policy_document" "api_task" {
       "cognito-idp:AdminGetUser",
       "cognito-idp:AdminAddUserToGroup"
     ]
-    resources = [aws_cognito_user_pool.workforce.arn]
+    # Staff onboarding writes to the workforce pool; patient portal enablement
+    # writes to the patient pool. The API needs both, not one or the other.
+    resources = [aws_cognito_user_pool.workforce.arn, aws_cognito_user_pool.staff.arn]
   }
   statement {
     actions   = ["sns:Publish"]
@@ -658,9 +660,12 @@ resource "aws_ecs_task_definition" "api" {
       { name = "PORT", value = "3000" },
       { name = "PATIENT_USER_POOL_ID", value = aws_cognito_user_pool.staff.id },
       { name = "WORKFORCE_USER_POOL_ID", value = aws_cognito_user_pool.workforce.id },
-      { name = "WORKFORCE_PORTAL_CLIENT_ID", value = aws_cognito_user_pool_client.workforce_portals.id }
+      { name = "WORKFORCE_PORTAL_CLIENT_ID", value = aws_cognito_user_pool_client.workforce_portals.id },
+      # The API expects the registry secret's identifier and looks the secret up itself.
+      # Declaring this under `secrets` made ECS resolve it, injecting the registry
+      # contents where an ARN was expected, so every registry read failed.
+      { name = "KANTAGE_TENANT_REGISTRY_SECRET_ID", value = var.tenant_registry_secret_arn }
     ]
-    secrets          = [{ name = "KANTAGE_TENANT_REGISTRY_SECRET_ID", valueFrom = var.tenant_registry_secret_arn }]
     logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.api.name, awslogs-region = var.region, awslogs-stream-prefix = "api" } }
     healthCheck      = { command = ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/healthz',res=>process.exit(res.statusCode===200?0:1)).on('error',()=>process.exit(1))\""], interval = 30, timeout = 5, retries = 3, startPeriod = 20 }
   }])
