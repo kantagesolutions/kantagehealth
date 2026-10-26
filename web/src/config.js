@@ -66,3 +66,9 @@ const actionLabels = {
 export function actionLabel(action) {
   return actionLabels[action] || action.replaceAll('.', ' ');
 }
+
+// US timezones a clinic can operate in, with plain names for the forms.
+export const timezones = [['America/New_York', 'Eastern'], ['America/Chicago', 'Central'], ['America/Denver', 'Mountain'], ['America/Phoenix', 'Arizona'], ['America/Los_Angeles', 'Pacific'], ['America/Anchorage', 'Alaska'], ['Pacific/Honolulu', 'Hawaii']];
+export function timezoneLabel(zone) {
+  return (timezones.find(([value]) => value === zone) || [zone, zone])[1];
+}
