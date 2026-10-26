@@ -4,8 +4,9 @@ import { AccessError, audit, query, requireCapability } from './context.js';
 const paymentInput=z.object({patientId:z.string().uuid(),amountCents:z.number().int().min(0).max(100_000_000),description:z.string().trim().min(1).max(500)}).strict();
 
 export async function listPayments(){
-  requireCapability('payments.read');
-  const result=await query('SELECT id,patient_id,amount_cents,care_code,description,status,created_at FROM clinical.payments ORDER BY created_at DESC LIMIT 200');
+  const c=requireCapability('payments.read');
+  // This clinic's own payments; a patient's payments elsewhere belong to their chart.
+  const result=await query('SELECT id,patient_id,amount_cents,care_code,description,status,created_at FROM clinical.payments WHERE location_id=$1 ORDER BY created_at DESC LIMIT 200',[c.locationId]);
   await audit('payments.read','payment');
   return result.rows;
 }
