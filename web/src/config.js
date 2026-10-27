@@ -42,6 +42,8 @@ const actionLabels = {
   'staff.activate': 'Restored staff member',
   'staff.archive': 'Archived staff member',
   'staff.delete': 'Deleted staff member',
+  'staff.login_remove': 'Removed staff sign in and archived account',
+  'patients.login_remove': 'Removed patient sign in and kept chart',
   'patients.list': 'Viewed patient list',
   'patients.read': 'Opened a patient profile',
   'patients.create': 'Added a patient',

@@ -3,13 +3,14 @@ import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
 import type { TenantConfig, TenantPoolRegistry, TenantRegistry } from './tenant-registry.js';
 import type { WorkforceAccountProvisioner } from './workforce-accounts.js';
+import type { IdentityRemover } from './account-removal.js';
 
 // Every role defined in clinical.role_capabilities except vendor support, which is only ever granted
 // through an audited support session. Mirrors clinical.assignable_role in migration 015.
 export const assignableRoles=['organization_owner','owner','clinic_administrator','provider','clinician','hygienist_assistant','front_desk','billing_specialist','billing','auditor'] as const;
 
 export interface PlatformActor { username:string; }
-interface PlatformActivity { action:string; organizationId:string|null; targetType:'organization'|'clinic'|'staff'; targetId:string|null; targetLabel:string; metadata?:Record<string,unknown>; }
+interface PlatformActivity { action:string; organizationId:string|null; targetType:'organization'|'clinic'|'staff'|'patient'; targetId:string|null; targetLabel:string; metadata?:Record<string,unknown>; }
 
 // Runs an administrator change and its audit entry in one transaction, so an action can never land
 // without its record, and a failed record undoes the action.
@@ -47,6 +48,53 @@ export async function listPlatformAccess(tenants:TenantConfig[],pools:TenantPool
     for(const row of result.rows as {organization_id:string;user_id:string}[]){const key=`${row.organization_id}:${row.user_id}`;if(!seen.has(key)){seen.add(key);rows.push(row);}}
   }
   return rows;
+}
+
+export async function listPlatformPatientLogins(tenant:TenantConfig,pools:TenantPoolRegistry){
+  const result=await (await pools.get(tenant)).query('SELECT * FROM clinical.platform_patient_logins($1)',[tenant.organizationId]);
+  return result.rows;
+}
+
+async function activeIdentityCount(tenants:TenantConfig[],pools:TenantPoolRegistry,kind:'patient'|'staff',identity:string){
+  let count=0; const seen=new Set<Pool>();
+  for(const tenant of tenants){
+    const pool=await pools.get(tenant); if(seen.has(pool)) continue; seen.add(pool);
+    const fn=kind==='patient'?'platform_active_patient_login_count':'platform_active_staff_login_count';
+    const result=await pool.query<{count:string}>(`SELECT clinical.${fn}($1) AS count`,[identity]);
+    count+=Number(result.rows[0]?.count??0);
+  }
+  return count;
+}
+
+// Archive first and write the audit record in the same transaction. A failed Cognito call leaves the
+// profile inaccessible and the operation can be retried without losing the clinical chart.
+export async function removePatientLogin(tenant:TenantConfig,tenants:TenantConfig[],pools:TenantPoolRegistry,remover:IdentityRemover,actor:PlatformActor,patientId:string){
+  const id=z.string().uuid().parse(patientId),org=tenant.organizationId;
+  const identity=await audited(await pools.get(tenant),actor,async client=>{
+    const found=await client.query<{name:string;username:string;cognito_sub:string}>('SELECT * FROM clinical.platform_patient_login_identity($1,$2)',[org,id]);
+    const account=found.rows[0]; if(!account) throw new Error('Patient portal account not found');
+    await client.query('SELECT clinical.platform_archive_patient_login($1,$2)',[org,id]);
+    return {result:account,activity:{action:'patients.login_remove',organizationId:org,targetType:'patient',targetId:id,targetLabel:'Patient portal account',metadata:{record:'retained'}}};
+  });
+  const shared=await activeIdentityCount(tenants,pools,'patient',identity.cognito_sub)>0;
+  if(!shared) await remover.removePatient(identity.username,identity.cognito_sub);
+  return {patientId:id,archived:true,identityRemoved:!shared};
+}
+
+export async function removeStaffLogin(tenant:TenantConfig,tenants:TenantConfig[],pools:TenantPoolRegistry,remover:IdentityRemover,actor:PlatformActor,userId:string){
+  const id=z.string().uuid().parse(userId),org=tenant.organizationId;
+  const identity=await audited(await pools.get(tenant),actor,async client=>{
+    const found=await client.query<{name:string;username:string}>('SELECT * FROM clinical.platform_staff_login_identity($1,$2)',[org,id]);
+    const account=found.rows[0]; if(!account) throw new Error('Staff member not found');
+    if(account.username===actor.username) throw new Error('You cannot remove your own sign in');
+    await remover.assertStaffRemovable(account.username);
+    const changed=await client.query<{updated:boolean}>('SELECT clinical.platform_set_user_status($1,$2,$3) AS updated',[org,id,'archived']);
+    if(!changed.rows[0]?.updated) throw new Error('Staff member not found');
+    return {result:account,activity:{action:'staff.login_remove',organizationId:org,targetType:'staff',targetId:id,targetLabel:account.name,metadata:{username:account.username,record:'retained'}}};
+  });
+  const shared=await activeIdentityCount(tenants,pools,'staff',identity.username)>0;
+  if(!shared) await remover.removeStaff(identity.username);
+  return {userId:id,archived:true,identityRemoved:!shared};
 }
 const orgStatus=z.object({status:z.enum(['active','suspended','archived'])}).strict();
 const userStatus=z.object({status:z.enum(['active','inactive','archived'])}).strict();

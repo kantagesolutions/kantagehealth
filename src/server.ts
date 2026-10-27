@@ -19,11 +19,12 @@ import { completeDocument, createDocumentUpload, listDocuments, patientDocumentO
 import { CognitoPatientAccountProvisioner, savePatientInvite, type PatientAccountProvisioner } from './patient-accounts.js';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { assignableRoles, createClinic, createPlatformClient, createPlatformStaff, deleteOrganization, deleteStaff, listClinics, listPlatformAccess, listPlatformActivity, listPlatformClients, organizationRecords, setClinicStatus, setOrganizationStatus, setUserStatus, staffRecords, updateClinic, updateOrganization, updatePlatformStaff, type PlatformActor } from './platform-admin.js';
+import { assignableRoles, createClinic, createPlatformClient, createPlatformStaff, deleteOrganization, deleteStaff, listClinics, listPlatformAccess, listPlatformActivity, listPlatformClients, listPlatformPatientLogins, organizationRecords, removePatientLogin, removeStaffLogin, setClinicStatus, setOrganizationStatus, setUserStatus, staffRecords, updateClinic, updateOrganization, updatePlatformStaff, type PlatformActor } from './platform-admin.js';
 import { CognitoWorkforceAccountProvisioner, type WorkforceAccountProvisioner } from './workforce-accounts.js';
+import { CognitoIdentityRemover, type IdentityRemover } from './account-removal.js';
 
 const requestScope=z.object({organizationId:z.string().uuid(),locationId:z.string().uuid()});
-interface Platform { registry:TenantRegistry; pools:TenantPoolRegistry; verifierFor(tenant:TenantConfig):TokenVerifier; workforceAuth?:StaffAuthConfig; workforceVerifier?:TokenVerifier; patientAuth?:StaffAuthConfig; patientVerifier?:TokenVerifier; patientAccounts?:PatientAccountProvisioner; workforceAccounts?:WorkforceAccountProvisioner; s3?:S3Client; }
+interface Platform { registry:TenantRegistry; pools:TenantPoolRegistry; verifierFor(tenant:TenantConfig):TokenVerifier; workforceAuth?:StaffAuthConfig; workforceVerifier?:TokenVerifier; patientAuth?:StaffAuthConfig; patientVerifier?:TokenVerifier; patientAccounts?:PatientAccountProvisioner; workforceAccounts?:WorkforceAccountProvisioner; identityRemover?:IdentityRemover; s3?:S3Client; }
 
 function patientAuth(tenant:TenantConfig):StaffAuthConfig { return {userPoolId:tenant.staffUserPoolId,clientId:staffClientIds(tenant)}; }
 function workforceAuth(platform:Platform,tenant:TenantConfig):StaffAuthConfig { return platform.workforceAuth??patientAuth(tenant); }
@@ -178,6 +179,23 @@ export function createHealthcareServer(platform:Platform):Server {
         if(request.method==='POST'&&path==='/v1/admin/staff') {
           if(!platform.workforceAccounts) throw new Error('Workforce onboarding is unavailable');
           return send(response,201,{staff:await createPlatformStaff(tenants,platform.pools,platform.workforceAccounts,actor,await body(request))});
+        }
+        const patientLoginsMatch=path.match(/^\/v1\/admin\/clients\/([0-9a-f-]{36})\/patient-logins$/i);
+        if(request.method==='GET'&&patientLoginsMatch?.[1]) {
+          const tenant=tenants.find(item=>item.organizationId===patientLoginsMatch[1]); if(!tenant) throw new AccessError(404);
+          return send(response,200,{patients:await listPlatformPatientLogins(tenant,platform.pools)});
+        }
+        const patientLoginMatch=path.match(/^\/v1\/admin\/clients\/([0-9a-f-]{36})\/patient-logins\/([0-9a-f-]{36})$/i);
+        if(request.method==='DELETE'&&patientLoginMatch?.[1]&&patientLoginMatch[2]) {
+          const tenant=tenants.find(item=>item.organizationId===patientLoginMatch[1]); if(!tenant) throw new AccessError(404);
+          if(!platform.identityRemover) throw new Error('Identity removal is unavailable');
+          return send(response,200,{patient:await removePatientLogin(tenant,tenants,platform.pools,platform.identityRemover,actor,patientLoginMatch[2])});
+        }
+        const staffLoginMatch=path.match(/^\/v1\/admin\/access\/([0-9a-f-]{36})\/([0-9a-f-]{36})\/login$/i);
+        if(request.method==='DELETE'&&staffLoginMatch?.[1]&&staffLoginMatch[2]) {
+          const tenant=tenants.find(item=>item.organizationId===staffLoginMatch[1]); if(!tenant) throw new AccessError(404);
+          if(!platform.identityRemover) throw new Error('Identity removal is unavailable');
+          return send(response,200,{user:await removeStaffLogin(tenant,tenants,platform.pools,platform.identityRemover,actor,staffLoginMatch[2])});
         }
         const orgMatch=path.match(/^\/v1\/admin\/clients\/([0-9a-f-]{36})$/i);
         if(request.method==='PATCH'&&orgMatch?.[1]) {
@@ -373,7 +391,7 @@ if(process.argv[1] && fileURLToPath(import.meta.url)===process.argv[1]) {
   const patientAuthConfig=patientClientId&&process.env.PATIENT_USER_POOL_ID?{userPoolId:process.env.PATIENT_USER_POOL_ID,clientId:patientClientId}:undefined;
   const server=createHealthcareServer({registry:productionRegistry(),pools,verifierFor:tenant=>staffVerifier(patientAuth(tenant)),workforceAuth:workforceAuthConfig,workforceVerifier:staffVerifier(workforceAuthConfig),
     ...(patientAuthConfig?{patientAuth:patientAuthConfig,patientVerifier:staffVerifier(patientAuthConfig)}:{}),
-    patientAccounts:new CognitoPatientAccountProvisioner(undefined,undefined,undefined,{usernames:Boolean(patientAuthConfig)}),workforceAccounts:new CognitoWorkforceAccountProvisioner(),s3:new S3Client({})});
+    patientAccounts:new CognitoPatientAccountProvisioner(undefined,undefined,undefined,{usernames:Boolean(patientAuthConfig)}),workforceAccounts:new CognitoWorkforceAccountProvisioner(),identityRemover:new CognitoIdentityRemover(),s3:new S3Client({})});
   server.listen(port,'0.0.0.0',()=>console.info(`D.A.Y Health Systems API listening on ${port}`));
   const stop=()=>server.close(()=>pools.close().finally(()=>process.exit(0)));
   process.once('SIGTERM',stop);

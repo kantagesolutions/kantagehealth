@@ -16,3 +16,18 @@ test('staff portal renders while clinic assignments are loading', async () => {
     delete globalThis.window;
   }
 });
+
+
+test('admin portal renders the organization directory before data loads', async () => {
+  globalThis.window = { location: { hostname: 'localhost', pathname: '/admin' } };
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' });
+  try {
+    const { AdminPortal } = await vite.ssrLoadModule('/src/main.jsx');
+    const html = renderToString(React.createElement(AdminPortal, { session: {} }));
+    assert.match(html, /Organization directory/);
+    assert.match(html, /Administrator navigation/);
+  } finally {
+    await vite.close();
+    delete globalThis.window;
+  }
+});

@@ -37,6 +37,6 @@ export async function completeDocument(id:string){
 
 export async function patientDocumentObject(poolQuery:(sql:string,values:unknown[])=>Promise<{rows:{object_key:string;content_type:string;name:string}[]}>,organizationId:string,sub:string,id:string){
   const result=await poolQuery(`SELECT d.object_key,d.content_type,d.name FROM clinical.patient_portal_accounts pa JOIN clinical.documents d ON d.organization_id=pa.organization_id AND d.patient_id=pa.patient_id
-    WHERE pa.organization_id=$1 AND pa.cognito_sub=$2 AND d.id=$3 AND d.status='ready'`,[organizationId,sub,z.string().uuid().parse(id)]);
+    WHERE pa.organization_id=$1 AND pa.cognito_sub=$2 AND pa.status IN ('invited','active') AND d.id=$3 AND d.status='ready'`,[organizationId,sub,z.string().uuid().parse(id)]);
   return result.rows[0];
 }
