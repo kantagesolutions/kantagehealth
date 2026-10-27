@@ -553,8 +553,10 @@ data "aws_iam_policy_document" "api_task" {
       ]
     )
   }
+  # Writing under this key needs a data key as well as decryption: the tenant registry when an
+  # organization or clinic is onboarded, and patient documents uploaded through presigned URLs.
   statement {
-    actions   = ["kms:Decrypt"]
+    actions   = ["kms:Decrypt", "kms:GenerateDataKey"]
     resources = [aws_kms_key.data.arn]
   }
   statement {

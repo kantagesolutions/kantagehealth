@@ -74,6 +74,18 @@ export async function setOrganizationStatus(tenant:TenantConfig,pools:TenantPool
     };
   });
 }
+const organizationInput=z.object({name:z.string().trim().min(2).max(160)}).strict();
+// Corrects an organization's name. Its System ID is permanent and is not editable here.
+export async function updateOrganization(tenant:TenantConfig,pools:TenantPoolRegistry,actor:PlatformActor,id:string,input:unknown){
+  const {name}=organizationInput.parse(input); const organizationId=z.string().uuid().parse(id);
+  return audited(await pools.get(tenant),actor,async client=>{
+    const result=await client.query<{previous:string}>('SELECT clinical.platform_update_organization($1,$2) AS previous',[organizationId,name]);
+    return {
+      result:{organizationId,name},
+      activity:{action:'organizations.update',organizationId,targetType:'organization',targetId:organizationId,targetLabel:name,metadata:{previous:{name:result.rows[0]?.previous},next:{name}}},
+    };
+  });
+}
 export async function setUserStatus(tenant:TenantConfig,pools:TenantPoolRegistry,actor:PlatformActor,organizationId:string,userId:string,input:unknown){
   const {status}=userStatus.parse(input); const org=z.string().uuid().parse(organizationId),user=z.string().uuid().parse(userId);
   return audited(await pools.get(tenant),actor,async client=>{
