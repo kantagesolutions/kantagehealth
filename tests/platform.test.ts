@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import test, { after, before } from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { Client, Pool } from 'pg';
-import { createClinic, createPlatformClient, deleteOrganization, deleteStaff, listClinics, listPlatformActivity, organizationRecords, setClinicStatus, setOrganizationStatus, setUserStatus, staffRecords, updateClinic, updateOrganization, updatePlatformStaff } from '../src/platform-admin.js';
+import { createClinic, createPlatformClient, deleteOrganization, deleteStaff, listClinics, listPlatformActivity, organizationRecords, removePatientLogin, removeStaffLogin, setClinicStatus, setOrganizationStatus, setUserStatus, staffRecords, updateClinic, updateOrganization, updatePlatformStaff } from '../src/platform-admin.js';
 import { createPublicBookingInquiry } from '../src/public-booking.js';
 import { registrySecretIdFrom, TenantRegistry, type TenantConfig } from '../src/tenant-registry.js';
 import { CognitoWorkforceAccountProvisioner } from '../src/workforce-accounts.js';
@@ -104,6 +104,43 @@ test('inviting an existing staff member only adds the group and sends no email',
   assert.equal(result.username,'existing.person');
   // The create call fails as a duplicate, so Cognito never sends a new invitation.
   assert.deepEqual(cognito.commands,['AdminCreateUserCommand','AdminGetUserCommand','AdminAddUserToGroupCommand']);
+});
+
+test('administrator removes a patient sign in while keeping the chart and audit trail',async()=>{
+  const patientId=randomUUID(),username=`patient.${run}`,sub=`sub-${run}`;
+  const root=new Client({connectionString}); await root.connect();
+  try {
+    await root.query("INSERT INTO clinical.patients(id,organization_id,location_id,first_name,last_name,phone,status) VALUES($1,$2,$3,'Test','Patient','4105550100','active')",[patientId,orgId,clinicA]);
+    await root.query("INSERT INTO clinical.patient_portal_accounts(organization_id,patient_id,cognito_sub,username,status) VALUES($1,$2,$3,$4,'active')",[orgId,patientId,sub,username]);
+  } finally { await root.end(); }
+  const calls:string[]=[];
+  const remover={removePatient:async(name:string,subject:string)=>{calls.push(`${name}:${subject}`);},assertStaffRemovable:async()=>{},removeStaff:async()=>{}};
+  const result=await removePatientLogin(tenant,[tenant],pools,remover,actor,patientId);
+  assert.equal(result.identityRemoved,true);
+  assert.deepEqual(calls,[`${username}:${sub}`]);
+  const verify=new Client({connectionString}); await verify.connect();
+  try {
+    assert.equal((await verify.query('SELECT status FROM clinical.patient_portal_accounts WHERE patient_id=$1',[patientId])).rows[0]?.status,'disabled');
+    assert.equal((await verify.query('SELECT count(*) FROM clinical.patients WHERE id=$1',[patientId])).rows[0]?.count,'1');
+    assert.equal((await verify.query("SELECT count(*) FROM clinical.platform_audit_log WHERE action='patients.login_remove' AND target_id=$1",[patientId])).rows[0]?.count,'1');
+  } finally { await verify.end(); }
+});
+
+test('administrator removes a staff sign in while keeping the staff record',async()=>{
+  const userId=randomUUID(),username=`removable.${run}`;
+  const root=new Client({connectionString}); await root.connect();
+  try { await root.query("INSERT INTO clinical.users(id,organization_id,cognito_sub,email,name,status) VALUES($1,$2,$3,$4,'Removable Staff','active')",[userId,orgId,username,`${username}@example.test`]); }
+  finally { await root.end(); }
+  const calls:string[]=[];
+  const remover={removePatient:async()=>{},assertStaffRemovable:async(name:string)=>{calls.push(`check:${name}`);},removeStaff:async(name:string)=>{calls.push(`remove:${name}`);}};
+  const result=await removeStaffLogin(tenant,[tenant],pools,remover,actor,userId);
+  assert.equal(result.identityRemoved,true);
+  assert.deepEqual(calls,[`check:${username}`,`remove:${username}`]);
+  const verify=new Client({connectionString}); await verify.connect();
+  try {
+    assert.equal((await verify.query('SELECT status FROM clinical.users WHERE id=$1',[userId])).rows[0]?.status,'archived');
+    assert.equal((await verify.query("SELECT count(*) FROM clinical.platform_audit_log WHERE action='staff.login_remove' AND target_id=$1",[userId])).rows[0]?.count,'1');
+  } finally { await verify.end(); }
 });
 
 test('a staff member with no clinic restriction sees every active clinic, matched by username',async()=>{

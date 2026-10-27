@@ -568,7 +568,9 @@ data "aws_iam_policy_document" "api_task" {
       "cognito-idp:AdminCreateUser",
       "cognito-idp:AdminGetUser",
       "cognito-idp:AdminAddUserToGroup",
-      "cognito-idp:AdminResetUserPassword"
+      "cognito-idp:AdminResetUserPassword",
+      "cognito-idp:AdminListGroupsForUser",
+      "cognito-idp:AdminDeleteUser"
     ]
     # Staff onboarding writes to the workforce pool; patient portal enablement
     # and login resets write to the patient pool. The original patient pool
