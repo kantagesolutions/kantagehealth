@@ -45,6 +45,14 @@ export async function createPatient(input:unknown){
  await query('INSERT INTO clinical.patient_locations(organization_id,location_id,patient_id) VALUES($1,$2,$3)',[c.organizationId,c.locationId,id]);
  await audit('patients.create','patient',id); return {id};
 }
+export async function updatePatient(id:string,input:unknown){
+ const c=requireCapability('patients.edit');
+ const patientId=z.string().uuid().parse(id);
+ const value=z.object({firstName:z.string().trim().min(1).max(80),lastName:z.string().trim().min(1).max(80),phone:z.string().trim().min(7).max(30),email:z.union([z.email().max(254),z.literal('')]).optional()}).strict().parse(input);
+ await query('SELECT clinical.update_linked_patient($1,$2,$3,$4,$5)',[patientId,value.firstName,value.lastName,value.phone,value.email||null]);
+ await audit('patients.update','patient',patientId);
+ return readPatient(patientId);
+}
 export async function searchRoamingPatients(search:string){
  const c=requireCapability('patients.edit');
  const value=z.string().trim().min(3).max(120).parse(search);
