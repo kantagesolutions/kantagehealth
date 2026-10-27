@@ -4,7 +4,7 @@ export const patientInput=z.object({firstName:z.string().trim().min(1).max(80),l
 export async function listPatients(){
  requireCapability('patients.read');
  const result=await query(`SELECT p.id,p.first_name,p.last_name,p.phone,p.email,p.status,
-   coalesce(pa.status,'not_enabled') AS portal_status,coalesce(pa.email_sent,false) AS portal_email_sent,coalesce(pa.text_sent,false) AS portal_text_sent
+   coalesce(pa.status,'not_enabled') AS portal_status,coalesce(pa.email_sent,false) AS portal_email_sent,coalesce(pa.text_sent,false) AS portal_text_sent,pa.username AS portal_username
    FROM clinical.patients p LEFT JOIN clinical.patient_portal_accounts pa ON pa.organization_id=p.organization_id AND pa.patient_id=p.id
    ORDER BY p.created_at DESC,p.id LIMIT 100`);
  await audit('patients.list','patient'); return result.rows;
@@ -12,20 +12,31 @@ export async function listPatients(){
 export async function readPatient(id:string){
  requireCapability('patients.read');
  const result=await query(`SELECT p.id,p.first_name,p.last_name,p.phone,p.email,p.status,
-   coalesce(pa.status,'not_enabled') AS portal_status,coalesce(pa.email_sent,false) AS portal_email_sent,coalesce(pa.text_sent,false) AS portal_text_sent
+   coalesce(pa.status,'not_enabled') AS portal_status,coalesce(pa.email_sent,false) AS portal_email_sent,coalesce(pa.text_sent,false) AS portal_text_sent,pa.username AS portal_username
    FROM clinical.patients p LEFT JOIN clinical.patient_portal_accounts pa ON pa.organization_id=p.organization_id AND pa.patient_id=p.id WHERE p.id=$1`,[id]);
  if(!result.rows[0]) throw new AccessError(404,'Not found');
  await audit('patients.read','patient',id); return result.rows[0];
 }
 export async function patientPortalInvitation(id:string){
  const c=requireCapability('patients.edit'); const patientId=z.string().uuid().parse(id);
- const result=await query<{id:string;first_name:string;last_name:string;email:string|null;phone:string;sms_consent:boolean;clinic_name:string}>(`SELECT p.id,p.first_name,p.last_name,p.email,p.phone,l.name AS clinic_name,
-   coalesce((SELECT b.sms_consent FROM clinical.booking_inquiries b WHERE b.organization_id=p.organization_id AND b.patient_id=p.id ORDER BY b.created_at DESC LIMIT 1),false) AS sms_consent
+ const result=await query<{id:string;first_name:string;last_name:string;email:string|null;phone:string;sms_consent:boolean;clinic_name:string;username:string|null}>(`SELECT p.id,p.first_name,p.last_name,p.email,p.phone,l.name AS clinic_name,
+   coalesce((SELECT b.sms_consent FROM clinical.booking_inquiries b WHERE b.organization_id=p.organization_id AND b.patient_id=p.id ORDER BY b.created_at DESC LIMIT 1),false) AS sms_consent,
+   (SELECT pa.username FROM clinical.patient_portal_accounts pa WHERE pa.organization_id=p.organization_id AND pa.patient_id=p.id) AS username
    FROM clinical.patients p JOIN clinical.locations l ON l.organization_id=p.organization_id AND l.id=$1 WHERE p.id=$2`,[c.locationId,patientId]);
  const patient=result.rows[0]; if(!patient) throw new AccessError(404,'Not found');
  if(!patient.email) throw new AccessError(400,'Add an email address before enabling patient portal access');
  await audit('portal.invite','patient',patient.id);
- return {organizationId:c.organizationId,patientId:patient.id,email:patient.email,phone:patient.phone,firstName:patient.first_name,clinicName:patient.clinic_name,textConsent:patient.sms_consent};
+ return {organizationId:c.organizationId,patientId:patient.id,email:patient.email,phone:patient.phone,firstName:patient.first_name,lastName:patient.last_name,clinicName:patient.clinic_name,textConsent:patient.sms_consent,existingUsername:patient.username};
+}
+// The portal account to reset for a patient who already has one: staff send a new invitation or reset
+// code instead of creating a second account.
+export async function patientPortalReset(id:string){
+ requireCapability('patients.edit'); const patientId=z.string().uuid().parse(id);
+ const result=await query<{username:string}>(`SELECT pa.username FROM clinical.patients p JOIN clinical.patient_portal_accounts pa ON pa.organization_id=p.organization_id AND pa.patient_id=p.id
+   WHERE p.id=$1 AND pa.status IN ('invited','active')`,[patientId]);
+ const account=result.rows[0]; if(!account) throw new AccessError(400,'Enable patient portal access before resetting the login.');
+ await audit('portal.reset','patient',patientId);
+ return {patientId,username:account.username};
 }
 export async function createPatient(input:unknown){
  const c=requireCapability('patients.edit'); const p=patientInput.parse(input);

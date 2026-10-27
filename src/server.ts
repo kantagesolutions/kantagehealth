@@ -5,7 +5,7 @@ import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { z, ZodError } from 'zod';
 import { AccessError, scoped } from './context.js';
 import { createAppointment, listAppointments } from './appointments.js';
-import { createCareRecord, createPatient, linkPatientToLocation, listCareRecords, listPatients, patientHistory, patientPortalInvitation, readPatient, searchRoamingPatients } from './patients.js';
+import { createCareRecord, createPatient, linkPatientToLocation, listCareRecords, listPatients, patientHistory, patientPortalInvitation, patientPortalReset, readPatient, searchRoamingPatients } from './patients.js';
 import { createPaymentRecord, listPayments } from './payments.js';
 import { approveMySupportAccess, listSupportAccess, requestSupportAccess } from './support.js';
 import type { StaffAuthConfig, TokenVerifier } from './auth.js';
@@ -23,10 +23,13 @@ import { assignableRoles, createClinic, createPlatformClient, createPlatformStaf
 import { CognitoWorkforceAccountProvisioner, type WorkforceAccountProvisioner } from './workforce-accounts.js';
 
 const requestScope=z.object({organizationId:z.string().uuid(),locationId:z.string().uuid()});
-interface Platform { registry:TenantRegistry; pools:TenantPoolRegistry; verifierFor(tenant:TenantConfig):TokenVerifier; workforceAuth?:StaffAuthConfig; workforceVerifier?:TokenVerifier; patientAccounts?:PatientAccountProvisioner; workforceAccounts?:WorkforceAccountProvisioner; s3?:S3Client; }
+interface Platform { registry:TenantRegistry; pools:TenantPoolRegistry; verifierFor(tenant:TenantConfig):TokenVerifier; workforceAuth?:StaffAuthConfig; workforceVerifier?:TokenVerifier; patientAuth?:StaffAuthConfig; patientVerifier?:TokenVerifier; patientAccounts?:PatientAccountProvisioner; workforceAccounts?:WorkforceAccountProvisioner; s3?:S3Client; }
 
 function patientAuth(tenant:TenantConfig):StaffAuthConfig { return {userPoolId:tenant.staffUserPoolId,clientId:staffClientIds(tenant)}; }
 function workforceAuth(platform:Platform,tenant:TenantConfig):StaffAuthConfig { return platform.workforceAuth??patientAuth(tenant); }
+// Patients sign in to one pool for the whole platform once it is configured; until then, to the pool each
+// organization's registry entry names.
+function patientSignIn(platform:Platform,tenant:TenantConfig):[StaffAuthConfig,TokenVerifier] { return platform.patientAuth&&platform.patientVerifier?[platform.patientAuth,platform.patientVerifier]:[patientAuth(tenant),platform.verifierFor(tenant)]; }
 function workforceVerifier(platform:Platform,tenant:TenantConfig):TokenVerifier { return platform.workforceVerifier??platform.verifierFor(tenant); }
 function workforceIdentities(claims:{sub:string;username?:string}):string[] {
   return [...new Set([claims.username,claims.sub].filter((value): value is string => Boolean(value)))];
@@ -60,7 +63,7 @@ interface PatientHome { clinic?:{id?:string}; [key:string]:unknown; }
 async function patientAccount(platform:Platform,bearer:string){
   for(const tenant of await platform.registry.list()) {
     try {
-      const claims=await verifyStaffToken(bearer,patientAuth(tenant),platform.verifierFor(tenant));
+      const claims=await verifyStaffToken(bearer,...patientSignIn(platform,tenant));
       const groups=(claims as Record<string,unknown>)['cognito:groups'];
       if(!Array.isArray(groups) || !groups.includes('dentalems_patient')) throw new AccessError(403);
       const pool=await platform.pools.get(tenant);
@@ -139,7 +142,7 @@ export function createHealthcareServer(platform:Platform):Server {
         const bearer=token(request);
         for(const tenant of await platform.registry.list()) {
           try {
-            const claims=await verifyStaffToken(bearer,patientAuth(tenant),platform.verifierFor(tenant));
+            const claims=await verifyStaffToken(bearer,...patientSignIn(platform,tenant));
             const groups=(claims as Record<string,unknown>)['cognito:groups'];
             if(!Array.isArray(groups) || !groups.includes('dentalems_patient')) throw new AccessError(403);
             const pool=await platform.pools.get(tenant);
@@ -249,9 +252,29 @@ export function createHealthcareServer(platform:Platform):Server {
           const result=await platform.patientAccounts!.invite(invitation);
           if(!result) throw new AccessError(400,'Patient email is required before portal access can be enabled');
           await savePatientInvite(pool,invitation,result);
-          return {emailSent:result.emailSent,textSent:result.textSent};
+          return {emailSent:result.emailSent,textSent:result.textSent,username:result.username};
         });
         return send(response,200,{portalAccess:enabled});
+      }
+      // Reset login: a new invitation for an account never signed in to, or a reset code otherwise.
+      const portalResetMatch=path.match(/^\/v1\/patients\/([0-9a-f-]{36})\/portal-reset$/i);
+      if(request.method==='POST' && portalResetMatch?.[1]) {
+        if(!platform.patientAccounts) throw new Error('Patient portal access is unavailable');
+        const reset=await scoped(pool,requestScopeData,async()=>{
+          const account=await patientPortalReset(portalResetMatch[1]!);
+          try { return {username:account.username,delivery:await platform.patientAccounts!.resetLogin(account.username)}; }
+          catch(error) {
+            if(!(error instanceof Error) || error.name!=='UserNotFoundException') throw error;
+            // The account is in the original email pool, or was removed: invite the patient afresh, under
+            // their name.
+            const invitation=await patientPortalInvitation(portalResetMatch[1]!);
+            const result=await platform.patientAccounts!.invite({...invitation,existingUsername:null});
+            if(!result) throw new AccessError(400,'Patient email is required before portal access can be enabled');
+            await savePatientInvite(pool,invitation,result);
+            return {username:result.username,delivery:'new_account' as const};
+          }
+        });
+        return send(response,200,{portalReset:reset});
       }
       if(request.method==='GET' && path==='/v1/patients/search') {
         const search=new URL(request.url??'/',`http://${request.headers.host??'localhost'}`).searchParams.get('q')??'';
@@ -340,7 +363,13 @@ if(process.argv[1] && fileURLToPath(import.meta.url)===process.argv[1]) {
   const pools=new TenantPoolRegistry(secrets);
   const workforceAuthConfig={userPoolId:process.env.WORKFORCE_USER_POOL_ID??'',clientId:process.env.WORKFORCE_PORTAL_CLIENT_ID??''};
   if(!workforceAuthConfig.userPoolId||!workforceAuthConfig.clientId) throw new Error('Workforce authentication is not configured');
-  const server=createHealthcareServer({registry:productionRegistry(),pools,verifierFor:tenant=>staffVerifier(patientAuth(tenant)),workforceAuth:workforceAuthConfig,workforceVerifier:staffVerifier(workforceAuthConfig),patientAccounts:new CognitoPatientAccountProvisioner(),workforceAccounts:new CognitoWorkforceAccountProvisioner(),s3:new S3Client({})});
+  // The patient pool that signs patients in by username. Without its client id the API keeps using each
+  // organization's original pool, where usernames are email addresses.
+  const patientClientId=process.env.PATIENT_PORTAL_CLIENT_ID??'';
+  const patientAuthConfig=patientClientId&&process.env.PATIENT_USER_POOL_ID?{userPoolId:process.env.PATIENT_USER_POOL_ID,clientId:patientClientId}:undefined;
+  const server=createHealthcareServer({registry:productionRegistry(),pools,verifierFor:tenant=>staffVerifier(patientAuth(tenant)),workforceAuth:workforceAuthConfig,workforceVerifier:staffVerifier(workforceAuthConfig),
+    ...(patientAuthConfig?{patientAuth:patientAuthConfig,patientVerifier:staffVerifier(patientAuthConfig)}:{}),
+    patientAccounts:new CognitoPatientAccountProvisioner(undefined,undefined,undefined,{usernames:Boolean(patientAuthConfig)}),workforceAccounts:new CognitoWorkforceAccountProvisioner(),s3:new S3Client({})});
   server.listen(port,'0.0.0.0',()=>console.info(`D.A.Y Health Systems API listening on ${port}`));
   const stop=()=>server.close(()=>pools.close().finally(()=>process.exit(0)));
   process.once('SIGTERM',stop);

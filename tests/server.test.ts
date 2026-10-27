@@ -114,3 +114,22 @@ test('clinic choices are identified by booking link only, and the patient portal
     for(const body of [publicList,portalList,home]) for(const id of [north,south,unlinked]) assert.ok(!JSON.stringify(body).includes(id));
   } finally { await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve())); }
 });
+
+test('once the patient username pool is configured, patient sign-ins are checked against it and not the organization\'s pool',async()=>{
+  const tenant={organizationId:'00000000-0000-4000-8000-000000000001',staffUserPoolId:'original-pool',staffClientId:'original-client',bookingClinics:[]};
+  const verified:string[]=[];
+  const server=createHealthcareServer({
+    registry:{list:async()=>[tenant]},
+    pools:{get:async()=>({query:async()=>({rows:[{home:{patient:{firstName:'Jamie'},clinic:{id:'x',name:'Clinic'},appointments:[],documents:[]}}]})})},
+    verifierFor:()=>({verify:async()=>{ verified.push('original'); return {sub:'p',token_use:'access',client_id:'original-client','cognito:groups':['dentalems_patient']}; }}),
+    patientAuth:{userPoolId:'patients-pool',clientId:'patient-portal-client'},
+    patientVerifier:{verify:async()=>{ verified.push('patients'); return {sub:'p',token_use:'access',client_id:'patient-portal-client','cognito:groups':['dentalems_patient']}; }},
+  } as never);
+  await new Promise<void>((resolve,reject)=>server.listen(0,'127.0.0.1',error=>error?reject(error):resolve()));
+  try {
+    const address=server.address(); if(!address || typeof address==='string') throw new Error('No test server address');
+    const response=await fetch(`http://127.0.0.1:${address.port}/v1/patient/home`,{headers:{authorization:'Bearer token'}});
+    assert.equal(response.status,200);
+    assert.deepEqual(verified,['patients']);
+  } finally { await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve())); }
+});
