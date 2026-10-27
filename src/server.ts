@@ -18,7 +18,7 @@ import { completeDocument, createDocumentUpload, listDocuments, patientDocumentO
 import { CognitoPatientAccountProvisioner, savePatientInvite, type PatientAccountProvisioner } from './patient-accounts.js';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { assignableRoles, createClinic, createPlatformClient, createPlatformStaff, deleteOrganization, deleteStaff, listClinics, listPlatformAccess, listPlatformActivity, listPlatformClients, organizationRecords, setClinicStatus, setOrganizationStatus, setUserStatus, staffRecords, updateClinic, updatePlatformStaff, type PlatformActor } from './platform-admin.js';
+import { assignableRoles, createClinic, createPlatformClient, createPlatformStaff, deleteOrganization, deleteStaff, listClinics, listPlatformAccess, listPlatformActivity, listPlatformClients, organizationRecords, setClinicStatus, setOrganizationStatus, setUserStatus, staffRecords, updateClinic, updateOrganization, updatePlatformStaff, type PlatformActor } from './platform-admin.js';
 import { CognitoWorkforceAccountProvisioner, type WorkforceAccountProvisioner } from './workforce-accounts.js';
 
 const requestScope=z.object({organizationId:z.string().uuid(),locationId:z.string().uuid()});
@@ -151,7 +151,7 @@ export function createHealthcareServer(platform:Platform):Server {
         throw new AccessError(404,'Document not found');
       }
       if(path.startsWith('/v1/admin/')) {
-        const bearer=token(request); const tenants=await platform.registry.list(); let accepted=false;
+        const bearer=token(request); let tenants=await platform.registry.list(); let accepted=false;
         let actor:PlatformActor|undefined;
         for(const tenant of tenants){
           try {
@@ -162,6 +162,9 @@ export function createHealthcareServer(platform:Platform):Server {
           } catch(error) { if(error instanceof Error&&error.message==='Unauthorized') continue; throw error; }
         }
         if(!actor) throw new AccessError(403);
+        // Administrators act on what other API tasks may have just changed, such as an organization created a
+        // moment ago, so their requests read the registry as it is now.
+        tenants=await platform.registry.refresh();
         if(request.method==='GET'&&path==='/v1/admin/clients') return send(response,200,{clients:await listPlatformClients(tenants,platform.pools)});
         if(request.method==='GET'&&path==='/v1/admin/access') return send(response,200,{users:await listPlatformAccess(tenants,platform.pools)});
         if(request.method==='GET'&&path==='/v1/admin/activity') return send(response,200,{activity:await listPlatformActivity(tenants,platform.pools)});
@@ -177,6 +180,13 @@ export function createHealthcareServer(platform:Platform):Server {
           return send(response,200,{client:await setOrganizationStatus(tenant,platform.pools,actor,orgMatch[1],await body(request))});
         }
         if(request.method==='DELETE'&&orgMatch?.[1]) return send(response,200,{client:await deleteOrganization(platform.registry,platform.pools,actor,orgMatch[1])});
+        // Editing has its own path so the status route keeps its meaning for the version still serving while a
+        // deploy rolls out.
+        const orgProfileMatch=path.match(/^\/v1\/admin\/clients\/([0-9a-f-]{36})\/profile$/i);
+        if(request.method==='PATCH'&&orgProfileMatch?.[1]) {
+          const tenant=tenants.find(item=>item.organizationId===orgProfileMatch[1]); if(!tenant) throw new AccessError(404,'Organization is not connected');
+          return send(response,200,{client:await updateOrganization(tenant,platform.pools,actor,orgProfileMatch[1],await body(request))});
+        }
         const orgRecordsMatch=path.match(/^\/v1\/admin\/clients\/([0-9a-f-]{36})\/records$/i);
         if(request.method==='GET'&&orgRecordsMatch?.[1]) {
           const tenant=tenants.find(item=>item.organizationId===orgRecordsMatch[1])??tenants[0]; if(!tenant) throw new AccessError(404);
