@@ -13,6 +13,7 @@ import { staffVerifier, verifyStaffToken } from './auth.js';
 import { productionRegistry, staffClientIds, TenantPoolRegistry, type TenantConfig, type TenantRegistry } from './tenant-registry.js';
 import { createPatientPortalBooking, createPublicBookingInquiry, listBookingClinics } from './public-booking.js';
 import { listStaffWorkspaces } from './workspaces.js';
+import { clinicReports, platformReports } from './reports.js';
 import { listBookingInquiries, resolveBookingMatch, scheduleBookingInquiry } from './bookings.js';
 import { completeDocument, createDocumentUpload, listDocuments, patientDocumentObject } from './documents.js';
 import { CognitoPatientAccountProvisioner, savePatientInvite, type PatientAccountProvisioner } from './patient-accounts.js';
@@ -169,6 +170,7 @@ export function createHealthcareServer(platform:Platform):Server {
         if(request.method==='GET'&&path==='/v1/admin/access') return send(response,200,{users:await listPlatformAccess(tenants,platform.pools)});
         if(request.method==='GET'&&path==='/v1/admin/activity') return send(response,200,{activity:await listPlatformActivity(tenants,platform.pools)});
         if(request.method==='GET'&&path==='/v1/admin/roles') return send(response,200,{roles:assignableRoles});
+        if(request.method==='GET'&&path==='/v1/admin/reports') return send(response,200,{report:await platformReports(tenants,platform.pools,new URL(request.url??'/','http://localhost').searchParams)});
         if(request.method==='POST'&&path==='/v1/admin/clients') return send(response,201,{client:await createPlatformClient(platform.registry,platform.pools,actor,await body(request))});
         if(request.method==='POST'&&path==='/v1/admin/staff') {
           if(!platform.workforceAccounts) throw new Error('Workforce onboarding is unavailable');
@@ -256,6 +258,7 @@ export function createHealthcareServer(platform:Platform):Server {
         return send(response,200,{patients:await scoped(pool,requestScopeData,()=>searchRoamingPatients(search))});
       }
       if(request.method==='GET' && path==='/v1/appointments') return send(response,200,{appointments:await scoped(pool,requestScopeData,listAppointments)});
+      if(request.method==='GET' && path==='/v1/reports') return send(response,200,{report:await scoped(pool,requestScopeData,()=>clinicReports(new URL(request.url??'/','http://localhost').searchParams))});
       if(request.method==='GET' && path==='/v1/booking-inquiries') return send(response,200,{inquiries:await scoped(pool,requestScopeData,listBookingInquiries)});
       const bookingScheduleMatch=path.match(/^\/v1\/booking-inquiries\/([0-9a-f-]{36})\/schedule$/i);
       if(bookingScheduleMatch?.[1] && request.method==='POST') {
