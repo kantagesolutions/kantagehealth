@@ -567,11 +567,13 @@ data "aws_iam_policy_document" "api_task" {
     actions = [
       "cognito-idp:AdminCreateUser",
       "cognito-idp:AdminGetUser",
-      "cognito-idp:AdminAddUserToGroup"
+      "cognito-idp:AdminAddUserToGroup",
+      "cognito-idp:AdminResetUserPassword"
     ]
     # Staff onboarding writes to the workforce pool; patient portal enablement
-    # writes to the patient pool. The API needs both, not one or the other.
-    resources = [aws_cognito_user_pool.workforce.arn, aws_cognito_user_pool.staff.arn]
+    # and login resets write to the patient pool. The original patient pool
+    # stays listed until no account depends on it.
+    resources = [aws_cognito_user_pool.workforce.arn, aws_cognito_user_pool.patients.arn, aws_cognito_user_pool.staff.arn]
   }
   statement {
     actions   = ["sns:Publish"]
@@ -660,7 +662,10 @@ resource "aws_ecs_task_definition" "api" {
     environment = [
       { name = "NODE_ENV", value = "production" },
       { name = "PORT", value = "3000" },
-      { name = "PATIENT_USER_POOL_ID", value = aws_cognito_user_pool.staff.id },
+      # Patients sign in to the username pool. With its client id set the API verifies patient
+      # tokens against it and names new accounts after the patient.
+      { name = "PATIENT_USER_POOL_ID", value = aws_cognito_user_pool.patients.id },
+      { name = "PATIENT_PORTAL_CLIENT_ID", value = aws_cognito_user_pool_client.patient_portal.id },
       { name = "WORKFORCE_USER_POOL_ID", value = aws_cognito_user_pool.workforce.id },
       { name = "WORKFORCE_PORTAL_CLIENT_ID", value = aws_cognito_user_pool_client.workforce_portals.id },
       # The API expects the registry secret's identifier and looks the secret up itself.
@@ -853,8 +858,8 @@ resource "aws_ecs_task_definition" "staff_portal" {
       { name = "NODE_ENV", value = "production" },
       { name = "WORKFORCE_PORTAL_CLIENT_ID", value = aws_cognito_user_pool_client.workforce_portals.id },
       { name = "WORKFORCE_LOGIN_DOMAIN", value = "https://${aws_cognito_user_pool_domain.workforce.domain}.auth.${var.region}.amazoncognito.com" },
-      { name = "PATIENT_PORTAL_CLIENT_ID", value = aws_cognito_user_pool_client.portals.id },
-      { name = "PATIENT_LOGIN_DOMAIN", value = "https://${aws_cognito_user_pool_domain.portals.domain}.auth.${var.region}.amazoncognito.com" }
+      { name = "PATIENT_PORTAL_CLIENT_ID", value = aws_cognito_user_pool_client.patient_portal.id },
+      { name = "PATIENT_LOGIN_DOMAIN", value = "https://${aws_cognito_user_pool_domain.patients.domain}.auth.${var.region}.amazoncognito.com" }
     ]
     logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.staff_portal[0].name, awslogs-region = var.region, awslogs-stream-prefix = "portal" } }
     healthCheck      = { command = ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/ || exit 1"], interval = 30, timeout = 5, retries = 3, startPeriod = 20 }
@@ -1151,6 +1156,80 @@ resource "aws_cognito_user_pool_client" "workforce_portals" {
   supported_identity_providers         = ["COGNITO"]
   callback_urls                        = [for hostname in ["admin.health.kantage.solutions", "staff.health.kantage.solutions"] : "https://${hostname}/"]
   logout_urls                          = [for hostname in ["admin.health.kantage.solutions", "staff.health.kantage.solutions"] : "https://${hostname}/"]
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_scopes                 = ["openid", "email", "profile"]
+  allowed_oauth_flows_user_pool_client = true
+  explicit_auth_flows                  = ["ALLOW_USER_SRP_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"]
+  access_token_validity                = 15
+  id_token_validity                    = 15
+  refresh_token_validity               = 1
+  token_validity_units {
+    access_token  = "minutes"
+    id_token      = "minutes"
+    refresh_token = "days"
+  }
+  prevent_user_existence_errors = "ENABLED"
+}
+
+# Patients sign in with a username made from their name, such as ibrahim.barry, and the next patient
+# with the same name gets ibrahim.barry2. The original patient pool takes only email addresses as
+# usernames, and that cannot be changed on an existing pool, so patients have their own pool. Email
+# stays on each account for invitations and password recovery, and families may share one address.
+resource "aws_cognito_user_pool" "patients" {
+  name              = "${local.name}-patients"
+  mfa_configuration = var.enable_staff_mfa ? "ON" : "OFF"
+  username_configuration { case_sensitive = false }
+  auto_verified_attributes = ["email"]
+  # Only staff create patient accounts, so the sign-in page offers no "Create an account".
+  admin_create_user_config {
+    allow_admin_create_user_only = true
+    invite_message_template {
+      email_subject = "Your patient portal account"
+      email_message = "Your patient portal account is ready.<br><br>Username: <strong>{username}</strong><br>Temporary password: <strong>{####}</strong><br><br>Sign in at https://patient.health.kantage.solutions within 3 days and choose your own password."
+      sms_message   = "Patient portal username: {username} Temporary password: {####}"
+    }
+  }
+  schema {
+    name                = "email"
+    attribute_data_type = "String"
+    required            = true
+    mutable             = true
+  }
+  dynamic "software_token_mfa_configuration" {
+    for_each = var.enable_staff_mfa ? [1] : []
+    content { enabled = true }
+  }
+  password_policy {
+    minimum_length                   = 14
+    require_lowercase                = true
+    require_uppercase                = true
+    require_numbers                  = true
+    require_symbols                  = true
+    temporary_password_validity_days = 3
+  }
+  account_recovery_setting {
+    recovery_mechanism {
+      name     = "verified_email"
+      priority = 1
+    }
+  }
+  tags = local.tags
+}
+resource "aws_cognito_user_group" "patients_dentalems_patient" {
+  name         = "dentalems_patient"
+  user_pool_id = aws_cognito_user_pool.patients.id
+  description  = "Patient portal accounts"
+}
+resource "aws_cognito_user_pool_domain" "patients" {
+  domain       = "kantage-patients-${data.aws_caller_identity.current.account_id}"
+  user_pool_id = aws_cognito_user_pool.patients.id
+}
+resource "aws_cognito_user_pool_client" "patient_portal" {
+  name                                 = "${local.name}-patient-portal"
+  user_pool_id                         = aws_cognito_user_pool.patients.id
+  supported_identity_providers         = ["COGNITO"]
+  callback_urls                        = ["https://patient.health.kantage.solutions/"]
+  logout_urls                          = ["https://patient.health.kantage.solutions/"]
   allowed_oauth_flows                  = ["code"]
   allowed_oauth_scopes                 = ["openid", "email", "profile"]
   allowed_oauth_flows_user_pool_client = true

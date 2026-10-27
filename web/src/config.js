@@ -63,6 +63,8 @@ const actionLabels = {
   'support.approved': 'Approved support access',
   'support.list': 'Viewed support access',
   'portal.invite': 'Enabled patient portal access',
+  'portal.reset': 'Reset a patient portal login',
+  'reports.read': 'Read clinic reports',
 };
 export function actionLabel(action) {
   return actionLabels[action] || action.replaceAll('.', ' ');
