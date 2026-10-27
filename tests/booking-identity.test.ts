@@ -63,6 +63,7 @@ test('a returning patient matching name, email and phone is recognised and left 
   await root(async client=>{
     assert.equal((await client.query<{location_id:string}>('SELECT location_id FROM clinical.patients WHERE id=$1',[aliceId])).rows[0]?.location_id,clinicA);
     assert.equal((await client.query('SELECT 1 FROM clinical.patient_locations WHERE patient_id=$1 AND location_id=ANY($2::uuid[])',[aliceId,[clinicA,clinicB]])).rowCount,2);
+    assert.deepEqual((await client.query('SELECT from_location_id,to_location_id,reason FROM clinical.patient_moves WHERE patient_id=$1',[aliceId])).rows,[{from_location_id:clinicB,to_location_id:clinicA,reason:'website_booking'}],'the move is recorded for reports');
   });
 });
 
@@ -89,6 +90,7 @@ test('confirming the same patient merges the booking into them, moves them here 
     assert.equal((await client.query('SELECT 1 FROM clinical.patient_locations WHERE patient_id=$1 AND location_id=$2',[beaId,clinicA])).rowCount,1,'Bea is now linked to this clinic');
     assert.equal((await client.query('SELECT 1 FROM clinical.patient_locations WHERE patient_id=$1 AND location_id=$2',[beaId,clinicB])).rowCount,1,'and still to the clinic she came from');
     assert.equal((await client.query<{location_id:string}>('SELECT location_id FROM clinical.patients WHERE id=$1',[beaId])).rows[0]?.location_id,clinicA,'her profile moved here');
+    assert.deepEqual((await client.query('SELECT from_location_id,to_location_id,reason FROM clinical.patient_moves WHERE patient_id=$1',[beaId])).rows,[{from_location_id:clinicB,to_location_id:clinicA,reason:'confirmed_match'}]);
     assert.equal((await client.query('SELECT 1 FROM clinical.appointments WHERE patient_id=$1 AND location_id=$2 AND status=$3',[beaId,clinicA,'requested'])).rowCount,1,'the requested appointment is hers');
     assert.equal((await client.query("SELECT 1 FROM clinical.audit_log WHERE action='bookings.match_confirmed' AND subject_id=$1",[booking.id])).rowCount,1);
   });

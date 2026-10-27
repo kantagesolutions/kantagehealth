@@ -28,10 +28,29 @@ ALTER TABLE clinical.booking_inquiries ADD COLUMN IF NOT EXISTS source text NOT 
 ALTER TABLE clinical.booking_inquiries DROP CONSTRAINT IF EXISTS booking_inquiries_source_check;
 ALTER TABLE clinical.booking_inquiries ADD CONSTRAINT booking_inquiries_source_check CHECK(source IN ('website','patient_portal'));
 
+-- Every move between clinics, so reports can count patients arriving at and leaving each clinic, and
+-- the clinic a patient first joined is known after they move. Written only by move_patient_to_clinic;
+-- the request role has no access to the table at all.
+CREATE TABLE IF NOT EXISTS clinical.patient_moves (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  organization_id uuid NOT NULL,
+  patient_id uuid NOT NULL,
+  from_location_id uuid NOT NULL,
+  to_location_id uuid NOT NULL,
+  reason text NOT NULL CHECK(reason IN ('website_booking','patient_portal_booking','confirmed_match')),
+  moved_at timestamptz NOT NULL DEFAULT now(),
+  FOREIGN KEY(organization_id,patient_id) REFERENCES clinical.patients(organization_id,id),
+  FOREIGN KEY(organization_id,from_location_id) REFERENCES clinical.locations(organization_id,id),
+  FOREIGN KEY(organization_id,to_location_id) REFERENCES clinical.locations(organization_id,id)
+);
+CREATE INDEX IF NOT EXISTS patient_moves_patient_idx ON clinical.patient_moves(organization_id,patient_id,moved_at);
+ALTER TABLE clinical.patient_moves ENABLE ROW LEVEL SECURITY;
+ALTER TABLE clinical.patient_moves FORCE ROW LEVEL SECURITY;
+
 -- Moves a patient's home clinic and links them there. Every patient is linked to their home clinic
 -- when created and links are never removed, so the clinic they leave keeps reading the care it gave.
 -- Only called from the functions below; never granted to the request role.
-CREATE OR REPLACE FUNCTION clinical.move_patient_to_clinic(p_organization_id uuid, p_patient_id uuid, p_location_id uuid)
+CREATE OR REPLACE FUNCTION clinical.move_patient_to_clinic(p_organization_id uuid, p_patient_id uuid, p_location_id uuid, p_reason text)
 RETURNS void
 LANGUAGE plpgsql SET search_path=pg_catalog,clinical AS $$
 DECLARE v_home uuid;
@@ -41,9 +60,11 @@ BEGIN
   INSERT INTO clinical.patient_locations(organization_id,location_id,patient_id) VALUES(p_organization_id,p_location_id,p_patient_id) ON CONFLICT DO NOTHING;
   IF v_home IS DISTINCT FROM p_location_id THEN
     UPDATE clinical.patients SET location_id=p_location_id WHERE organization_id=p_organization_id AND id=p_patient_id;
+    INSERT INTO clinical.patient_moves(organization_id,patient_id,from_location_id,to_location_id,reason)
+    VALUES(p_organization_id,p_patient_id,v_home,p_location_id,p_reason);
   END IF;
 END; $$;
-REVOKE ALL ON FUNCTION clinical.move_patient_to_clinic(uuid,uuid,uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION clinical.move_patient_to_clinic(uuid,uuid,uuid,text) FROM PUBLIC;
 
 -- As migration 018, except that a recognised returning patient now moves to the clinic they booked.
 -- Their name, email and phone are still never changed from here.
@@ -111,7 +132,7 @@ BEGIN
   ELSE
     -- The patient chose this clinic, so their profile moves here. Nothing else about them changes: the
     -- submitted details live on the booking request itself.
-    PERFORM clinical.move_patient_to_clinic(v_organization_id,v_patient_id,v_location_id);
+    PERFORM clinical.move_patient_to_clinic(v_organization_id,v_patient_id,v_location_id,'website_booking');
   END IF;
 
   INSERT INTO clinical.booking_inquiries(organization_id,location_id,patient_id,first_name,last_name,phone,email,appointment_type,preferred_date,preferred_contact,preferred_time,message,sms_consent,source_ip,user_agent,possible_match_patient_id)
@@ -149,7 +170,7 @@ BEGIN
      OR EXISTS(SELECT 1 FROM clinical.booking_inquiries WHERE organization_id=v_org AND patient_id=v_new AND id<>p_inquiry_id) THEN
     RAISE EXCEPTION 'This record already has its own history, so it cannot be merged automatically.';
   END IF;
-  PERFORM clinical.move_patient_to_clinic(v_org,v_existing,v_loc);
+  PERFORM clinical.move_patient_to_clinic(v_org,v_existing,v_loc,'confirmed_match');
   UPDATE clinical.booking_inquiries SET patient_id=v_existing,possible_match_patient_id=NULL WHERE id=p_inquiry_id;
   UPDATE clinical.appointments SET patient_id=v_existing WHERE organization_id=v_org AND patient_id=v_new;
   DELETE FROM clinical.patient_locations WHERE organization_id=v_org AND patient_id=v_new;
@@ -202,7 +223,7 @@ BEGIN
   WHERE l.organization_id=p_organization_id AND l.id=p_location_id AND l.status='active';
   IF v_clinic IS NULL THEN RAISE EXCEPTION 'That clinic is not taking bookings.'; END IF;
   PERFORM set_config('app.current_org',p_organization_id::text,true),set_config('app.current_location',p_location_id::text,true);
-  PERFORM clinical.move_patient_to_clinic(p_organization_id,v_patient,p_location_id);
+  PERFORM clinical.move_patient_to_clinic(p_organization_id,v_patient,p_location_id,'patient_portal_booking');
   INSERT INTO clinical.booking_inquiries(organization_id,location_id,patient_id,first_name,last_name,phone,email,appointment_type,preferred_date,preferred_contact,preferred_time,message,sms_consent,source_ip,user_agent,source)
   VALUES(p_organization_id,p_location_id,v_patient,v_first,v_last,v_phone,v_email,p_appointment_type,p_preferred_date,p_preferred_contact,p_preferred_time,p_message,coalesce(v_sms,false),p_source_ip,left(coalesce(p_user_agent,''),256),'patient_portal')
   RETURNING id INTO v_inquiry;

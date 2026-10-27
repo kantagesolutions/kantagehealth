@@ -123,6 +123,8 @@ test('a patient booking from the portal moves to the clinic they chose; earlier 
   unaBooking=booking!.id;
   assert.equal(await home(unaId),clinicB,'her profile moved');
   assert.deepEqual(await linkedTo(unaId),[clinicA,clinicB].sort(),'clinic A keeps its link');
+  const moves=await root(async client=>(await client.query('SELECT from_location_id,to_location_id,reason FROM clinical.patient_moves WHERE patient_id=$1',[unaId])).rows);
+  assert.deepEqual(moves,[{from_location_id:clinicA,to_location_id:clinicB,reason:'patient_portal_booking'}]);
   const request=await root(async client=>(await client.query('SELECT location_id,first_name,email,source,possible_match_patient_id FROM clinical.booking_inquiries WHERE id=$1',[booking!.id])).rows[0]);
   assert.deepEqual(request,{location_id:clinicB,first_name:'Una',email:`una.${run}@example.test`,source:'patient_portal',possible_match_patient_id:null},'the request carries her own record\'s details');
   // Clinic B now sees her, and clinic A still reads her chart, including the new request at clinic B.
@@ -151,4 +153,13 @@ test('the activity feed says a booking came from the patient portal, and nothing
   const rows=await root(async client=>(await client.query("SELECT * FROM clinical.platform_activity() WHERE organization_name=$1 AND action='bookings.received'",[orgName])).rows);
   assert.deepEqual(rows.map(row=>[row.location_name,row.source,row.actor_name]),[['Clinic B','patient portal','Patient portal']]);
   assert.ok(!JSON.stringify(rows).includes('Una'));
+});
+
+// Last, because it adds a booking at clinic A that the tests above do not expect.
+test('a request at the clinic a patient is already at is not a move',async()=>{
+  await createPatientPortalBooking(appPool,tenant,patSub,{clinic:keys.a,appointmentType:'Follow-up'},{userAgent:'healthcare-test'});
+  assert.equal(await home(patId),clinicA);
+  assert.equal((await root(client=>client.query('SELECT 1 FROM clinical.patient_moves WHERE patient_id=$1',[patId]))).rowCount,0);
+  // Only reports read the move log, and only as counts.
+  await assert.rejects(scoped(appPool,staffB,()=>query('SELECT * FROM clinical.patient_moves')),/permission denied/);
 });
