@@ -5,7 +5,7 @@ import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { z, ZodError } from 'zod';
 import { AccessError, scoped } from './context.js';
 import { createAppointment, listAppointments } from './appointments.js';
-import { createCareRecord, createPatient, linkPatientToLocation, listCareRecords, listPatients, patientHistory, patientPortalInvitation, patientPortalReset, readPatient, searchRoamingPatients } from './patients.js';
+import { createCareRecord, createPatient, linkPatientToLocation, listCareRecords, listPatients, patientHistory, patientPortalInvitation, patientPortalReset, readPatient, searchRoamingPatients, updatePatient } from './patients.js';
 import { createPaymentRecord, listPayments } from './payments.js';
 import { approveMySupportAccess, listSupportAccess, requestSupportAccess } from './support.js';
 import type { StaffAuthConfig, TokenVerifier } from './auth.js';
@@ -244,6 +244,10 @@ export function createHealthcareServer(platform:Platform):Server {
       if(request.method==='GET' && path==='/v1/patients') return send(response,200,{patients:await scoped(pool,requestScopeData,listPatients)});
       const patientMatch=path.match(/^\/v1\/patients\/([0-9a-f-]{36})$/i);
       if(request.method==='GET' && patientMatch?.[1]) return send(response,200,{patient:await scoped(pool,requestScopeData,()=>readPatient(patientMatch[1]!))});
+      if(request.method==='PATCH' && patientMatch?.[1]) {
+        const payload=await body(request);
+        return send(response,200,{patient:await scoped(pool,requestScopeData,()=>updatePatient(patientMatch[1]!,payload))});
+      }
       const portalAccessMatch=path.match(/^\/v1\/patients\/([0-9a-f-]{36})\/portal-access$/i);
       if(request.method==='POST' && portalAccessMatch?.[1]) {
         if(!platform.patientAccounts) throw new Error('Patient portal access is unavailable');

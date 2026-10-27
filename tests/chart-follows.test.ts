@@ -5,11 +5,11 @@ import assert from 'node:assert/strict';
 import test, { after, before } from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { Client, Pool } from 'pg';
-import { listAppointments } from '../src/appointments.js';
+import { createAppointment, listAppointments } from '../src/appointments.js';
 import { scheduleBookingInquiry } from '../src/bookings.js';
 import { query, scoped } from '../src/context.js';
 import { listDocuments } from '../src/documents.js';
-import { linkPatientToLocation, patientHistory } from '../src/patients.js';
+import { linkPatientToLocation, patientHistory, updatePatient } from '../src/patients.js';
 import { listPayments } from '../src/payments.js';
 import { createPatientPortalBooking, listBookingClinics } from '../src/public-booking.js';
 
@@ -75,6 +75,16 @@ test('once linked, clinic B reads the whole chart from clinic A, labelled with t
   assert.equal(await chartRows(staffB,'invoices',patId),1,'invoices follow too');
 });
 
+test('a linked clinic can update contact details without moving the patient or changing portal recovery email',async()=>{
+  const email=`pat.${run}@example.test`;
+  const updated=await scoped(appPool,staffB,()=>updatePatient(patId,{firstName:'Patricia',lastName:'Test',phone:'4105550199',email}));
+  assert.equal(updated.first_name,'Patricia');
+  assert.equal(updated.phone,'4105550199');
+  assert.equal(await home(patId),clinicA);
+  await assert.rejects(scoped(appPool,staffB,()=>updatePatient(patId,{firstName:'Patricia',lastName:'Test',phone:'4105550199',email:'different@example.test'})),/Portal email cannot be changed/);
+  await assert.rejects(scoped(appPool,staffB,()=>updatePatient(zedId,{firstName:'Zed',lastName:'Test',phone:'4105550199'})),/Patient not found/);
+});
+
 test('clinic B still cannot write into clinic A\'s records',async()=>{
   await assert.rejects(scoped(appPool,staffB,()=>query("INSERT INTO clinical.care_records(organization_id,location_id,patient_id,record_type,note,provider_user_id) VALUES($1,$2,$3,'note','Written under clinic A by clinic B',$4)",[orgId,clinicA,patId,userB])),/row-level security/);
   const changed=await scoped(appPool,staffB,async()=>({
@@ -93,6 +103,13 @@ test('clinic B\'s schedule, payments and documents lists stay its own',async()=>
   assert.equal(lists.appointments.length,0);
   assert.equal(lists.payments.length,0);
   assert.equal(lists.documents.length,0);
+});
+
+test('staff can schedule a linked patient before a provider is assigned',async()=>{
+  const scheduled=await scoped(appPool,staffB,()=>createAppointment({patientId:patId,service:'Exam',startTime:new Date(Date.now()+86400000).toISOString(),durationMinutes:30}));
+  assert.ok(scheduled.id);
+  const appointments=await scoped(appPool,staffB,listAppointments);
+  assert.equal(appointments.find(item=>item.id===scheduled.id)?.provider_user_id,null);
 });
 
 test('a patient never linked to clinic B stays invisible to it',async()=>{
