@@ -11,9 +11,11 @@ import { createPublicBookingInquiry } from '../src/public-booking.js';
 const connectionString=process.env.TEST_DATABASE_URL ?? 'postgresql://venuscollective@127.0.0.1:55439/kantage_healthcare_test';
 const appPool=new Pool({connectionString:connectionString.replace(/\/\/[^@]+@/,'//kh_test_request@'),max:4,idleTimeoutMillis:1_000});
 const run=randomUUID().slice(0,8);
-const orgId=randomUUID(), clinicA=randomUUID(), clinicB=randomUUID(), aliceId=randomUUID(), staffId=randomUUID();
+const orgId=randomUUID(), clinicA=randomUUID(), clinicB=randomUUID(), aliceId=randomUUID(), beaId=randomUUID(), staffId=randomUUID();
 const staffSub=`desk.${run}`;
 const alice={firstName:'Alice',lastName:'Rivera',email:`alice.${run}@example.test`,phone:'410-555-0101'};
+// Never seen at clinic A, unlike Alice once she books there as a returning patient.
+const bea={firstName:'Bea',lastName:'Okafor',email:`bea.${run}@example.test`,phone:'410-555-0102'};
 const target={organizationId:orgId,locationId:clinicA,clinicName:'Clinic A',timezone:'America/New_York'};
 const staffScope={organizationId:orgId,locationId:clinicA,sub:staffSub,userAgent:'healthcare-test'};
 
@@ -27,7 +29,10 @@ before(async()=>root(async client=>{
   await client.query('GRANT kh_request TO kh_test_request');
   await client.query('INSERT INTO clinical.organizations(id,slug,name,status) VALUES($1,$2,$3,$4)',[orgId,`identity-${run}`,'Identity Org','active']);
   await client.query("INSERT INTO clinical.locations(id,organization_id,name,timezone,address,status) VALUES($1,$3,'Clinic A','America/New_York','','active'),($2,$3,'Clinic B','America/New_York','','active')",[clinicA,clinicB,orgId]);
-  await client.query("INSERT INTO clinical.patients(id,organization_id,location_id,first_name,last_name,phone,email,allergies,insurance,status) VALUES($1,$2,$3,$4,$5,$6,$7,'','','active')",[aliceId,orgId,clinicB,alice.firstName,alice.lastName,alice.phone,alice.email]);
+  for(const [id,person] of [[aliceId,alice],[beaId,bea]] as const) {
+    await client.query("INSERT INTO clinical.patients(id,organization_id,location_id,first_name,last_name,phone,email,allergies,insurance,status) VALUES($1,$2,$3,$4,$5,$6,$7,'','','active')",[id,orgId,clinicB,person.firstName,person.lastName,person.phone,person.email]);
+    await client.query('INSERT INTO clinical.patient_locations(organization_id,location_id,patient_id) VALUES($1,$2,$3)',[orgId,clinicB,id]);
+  }
   await client.query('INSERT INTO clinical.users(id,organization_id,cognito_sub,email,name,status) VALUES($1,$2,$3,$4,$5,$6)',[staffId,orgId,staffSub,`${staffSub}@example.test`,'Front Desk','active']);
   await client.query("INSERT INTO clinical.user_roles(organization_id,user_id,role) VALUES($1,$2,'front_desk')",[orgId,staffId]);
 }));
@@ -54,30 +59,42 @@ test('a returning patient matching name, email and phone is recognised and left 
   assert.equal((await inquiry(booking.id))?.possible_match_patient_id,null);
   // The submitted formatting is kept on the booking request, never written over the patient.
   assert.deepEqual(await patient(aliceId),{first_name:'Alice',last_name:'Rivera',email:alice.email,phone:alice.phone});
+  // She chose clinic A, so her profile moves there; clinic B keeps its link and the care it gave.
+  await root(async client=>{
+    assert.equal((await client.query<{location_id:string}>('SELECT location_id FROM clinical.patients WHERE id=$1',[aliceId])).rows[0]?.location_id,clinicA);
+    assert.equal((await client.query('SELECT 1 FROM clinical.patient_locations WHERE patient_id=$1 AND location_id=ANY($2::uuid[])',[aliceId,[clinicA,clinicB]])).rowCount,2);
+    assert.deepEqual((await client.query('SELECT from_location_id,to_location_id,reason FROM clinical.patient_moves WHERE patient_id=$1',[aliceId])).rows,[{from_location_id:clinicB,to_location_id:clinicA,reason:'website_booking'}],'the move is recorded for reports');
+  });
 });
 
 test('staff see who a booking might be, at which clinic, and which detail matched',async()=>{
-  const booking=await book({firstName:'Allison',lastName:'Rivera',email:alice.email,phone:'410-555-0999'});
+  const booking=await book({firstName:'Beatrice',lastName:'Okafor',email:bea.email,phone:'410-555-0999'});
   const rows=await scoped(appPool,staffScope,listBookingInquiries) as {id:string;match_name:string;match_clinic:string;matched_on:string}[];
   const row=rows.find(item=>item.id===booking.id);
-  assert.equal(row?.match_name,'Alice Rivera');
+  assert.equal(row?.match_name,'Bea Okafor');
   assert.equal(row?.match_clinic,'Clinic B','the match lives at another clinic, still in this organization');
   assert.equal(row?.matched_on,'email');
 });
 
-test('confirming the same patient merges the booking into them and leaves nothing orphaned',async()=>{
-  const booking=await book({firstName:'Alicia',lastName:'Rivera',email:alice.email,phone:alice.phone});
+// Bea has never been seen at clinic A. Migration 018 moved the requested appointment onto her before
+// linking her to the clinic, which the appointment's link to the clinic forbids, so this failed.
+test('confirming the same patient merges the booking into them, moves them here and leaves nothing orphaned',async()=>{
+  const booking=await book({firstName:'Beatrice',lastName:'Okafor',email:bea.email,phone:bea.phone});
   const duplicate=booking.patientId;
   await scoped(appPool,staffScope,()=>resolveBookingMatch(booking.id,{samePatient:true}));
-  assert.deepEqual(await inquiry(booking.id),{patient_id:aliceId,possible_match_patient_id:null});
+  assert.deepEqual(await inquiry(booking.id),{patient_id:beaId,possible_match_patient_id:null});
   await root(async client=>{
     assert.equal((await client.query('SELECT 1 FROM clinical.patients WHERE id=$1',[duplicate])).rowCount,0,'the duplicate record is gone');
     assert.equal((await client.query('SELECT 1 FROM clinical.appointments WHERE patient_id=$1',[duplicate])).rowCount,0,'its requested appointment moved');
     assert.equal((await client.query('SELECT 1 FROM clinical.patient_locations WHERE patient_id=$1',[duplicate])).rowCount,0);
-    assert.equal((await client.query('SELECT 1 FROM clinical.patient_locations WHERE patient_id=$1 AND location_id=$2',[aliceId,clinicA])).rowCount,1,'Alice is now linked to this clinic');
+    assert.equal((await client.query('SELECT 1 FROM clinical.patient_locations WHERE patient_id=$1 AND location_id=$2',[beaId,clinicA])).rowCount,1,'Bea is now linked to this clinic');
+    assert.equal((await client.query('SELECT 1 FROM clinical.patient_locations WHERE patient_id=$1 AND location_id=$2',[beaId,clinicB])).rowCount,1,'and still to the clinic she came from');
+    assert.equal((await client.query<{location_id:string}>('SELECT location_id FROM clinical.patients WHERE id=$1',[beaId])).rows[0]?.location_id,clinicA,'her profile moved here');
+    assert.deepEqual((await client.query('SELECT from_location_id,to_location_id,reason FROM clinical.patient_moves WHERE patient_id=$1',[beaId])).rows,[{from_location_id:clinicB,to_location_id:clinicA,reason:'confirmed_match'}]);
+    assert.equal((await client.query('SELECT 1 FROM clinical.appointments WHERE patient_id=$1 AND location_id=$2 AND status=$3',[beaId,clinicA,'requested'])).rowCount,1,'the requested appointment is hers');
     assert.equal((await client.query("SELECT 1 FROM clinical.audit_log WHERE action='bookings.match_confirmed' AND subject_id=$1",[booking.id])).rowCount,1);
   });
-  assert.deepEqual(await patient(aliceId),{first_name:'Alice',last_name:'Rivera',email:alice.email,phone:alice.phone},'still unchanged');
+  assert.deepEqual(await patient(beaId),{first_name:'Bea',last_name:'Okafor',email:bea.email,phone:bea.phone},'still unchanged');
 });
 
 test('marking a different person keeps both records and clears the flag',async()=>{

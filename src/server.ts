@@ -5,13 +5,13 @@ import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { z, ZodError } from 'zod';
 import { AccessError, scoped } from './context.js';
 import { createAppointment, listAppointments } from './appointments.js';
-import { createCareRecord, createPatient, linkPatientToLocation, listCareRecords, listPatients, patientPortalInvitation, readPatient, searchRoamingPatients } from './patients.js';
+import { createCareRecord, createPatient, linkPatientToLocation, listCareRecords, listPatients, patientHistory, patientPortalInvitation, readPatient, searchRoamingPatients } from './patients.js';
 import { createPaymentRecord, listPayments } from './payments.js';
 import { approveMySupportAccess, listSupportAccess, requestSupportAccess } from './support.js';
 import type { StaffAuthConfig, TokenVerifier } from './auth.js';
 import { staffVerifier, verifyStaffToken } from './auth.js';
 import { productionRegistry, staffClientIds, TenantPoolRegistry, type TenantConfig, type TenantRegistry } from './tenant-registry.js';
-import { createPublicBookingInquiry } from './public-booking.js';
+import { createPatientPortalBooking, createPublicBookingInquiry, listBookingClinics } from './public-booking.js';
 import { listStaffWorkspaces } from './workspaces.js';
 import { listBookingInquiries, resolveBookingMatch, scheduleBookingInquiry } from './bookings.js';
 import { completeDocument, createDocumentUpload, listDocuments, patientDocumentObject } from './documents.js';
@@ -53,6 +53,25 @@ async function body(request:IncomingMessage):Promise<unknown>{
 }
 function remoteIp(request:IncomingMessage){ return request.socket.remoteAddress?.slice(0,64); }
 const bookingAttempts=new Map<string,{count:number;expiresAt:number}>();
+// The organization a signed-in patient belongs to, and their portal home. Every organization shares the
+// patient sign-in, so the token is tried against each until one holds a portal account for it.
+interface PatientHome { clinic?:{id?:string}; [key:string]:unknown; }
+async function patientAccount(platform:Platform,bearer:string){
+  for(const tenant of await platform.registry.list()) {
+    try {
+      const claims=await verifyStaffToken(bearer,patientAuth(tenant),platform.verifierFor(tenant));
+      const groups=(claims as Record<string,unknown>)['cognito:groups'];
+      if(!Array.isArray(groups) || !groups.includes('dentalems_patient')) throw new AccessError(403);
+      const pool=await platform.pools.get(tenant);
+      const result=await pool.query<{home:PatientHome|null}>('SELECT clinical.patient_portal_home($1,$2) AS home',[tenant.organizationId,claims.sub]);
+      const home=result.rows[0]?.home;
+      if(home) return {tenant,pool,sub:claims.sub,home};
+    } catch(error) { if(error instanceof AccessError) throw error; if(error instanceof Error && error.message==='Unauthorized') continue; throw error; }
+  }
+  throw new AccessError(404,'Patient profile not found');
+}
+// The portal shows the patient's clinic by name; its internal id stays on the server.
+function withoutClinicId(home:PatientHome){ const {id:_id,...clinic}=home.clinic??{}; return {...home,clinic}; }
 function allowBooking(ip:string,key:string){ const now=Date.now(), id=`${ip}:${key}`, current=bookingAttempts.get(id); if(!current || current.expiresAt<=now) { bookingAttempts.set(id,{count:1,expiresAt:now+60*60*1000}); return true; } if(current.count>=8) return false; current.count+=1; return true; }
 
 export function createHealthcareServer(platform:Platform):Server {
@@ -61,13 +80,18 @@ export function createHealthcareServer(platform:Platform):Server {
       if(request.method==='OPTIONS') return send(response,204,{});
       if(request.method==='GET' && request.url==='/healthz') return send(response,200,{status:'ok'});
       const path=(request.url??'/').split('?')[0] ?? '/';
-      const publicBookingMatch=path.match(/^\/v1\/public\/booking\/([A-Za-z0-9_-]{20,128})(?:\/inquiries)?$/);
+      const publicBookingMatch=path.match(/^\/v1\/public\/booking\/([A-Za-z0-9_-]{20,128})(?:\/(inquiries|clinics))?$/);
       if(publicBookingMatch?.[1]) {
         const resolved=await platform.registry.findBooking(publicBookingMatch[1]);
         if(!resolved) return send(response,404,{error:'Booking destination not found'});
         const target={organizationId:resolved.tenant.organizationId,locationId:resolved.clinic.locationId,clinicName:resolved.clinic.clinicName,timezone:resolved.clinic.timezone};
-        if(request.method==='GET' && !path.endsWith('/inquiries')) return send(response,200,{clinic:{name:target.clinicName,timezone:target.timezone}});
-        if(request.method==='POST' && path.endsWith('/inquiries')) {
+        if(request.method==='GET' && !publicBookingMatch[2]) return send(response,200,{clinic:{name:target.clinicName,timezone:target.timezone}});
+        // Every clinic in this booking link's network, so a website can let the patient choose.
+        if(request.method==='GET' && publicBookingMatch[2]==='clinics') {
+          const pool=await platform.pools.get(resolved.tenant);
+          return send(response,200,{clinics:await listBookingClinics(pool,resolved.tenant.organizationId,resolved.tenant.bookingClinics)});
+        }
+        if(request.method==='POST' && publicBookingMatch[2]==='inquiries') {
           const ip=remoteIp(request)??'unknown';
           if(!allowBooking(ip,publicBookingMatch[1])) return send(response,429,{error:'Please try again later'});
           const pool=await platform.pools.get(resolved.tenant);
@@ -94,19 +118,19 @@ export function createHealthcareServer(platform:Platform):Server {
         if(!tokenAccepted) throw new AccessError(401,'Unauthorized');
         return send(response,200,{workspaces});
       }
-      if(request.method==='GET' && path==='/v1/patient/home') {
-        const bearer=token(request);
-        for(const tenant of await platform.registry.list()) {
-          try {
-            const claims=await verifyStaffToken(bearer,patientAuth(tenant),platform.verifierFor(tenant));
-            const groups=(claims as Record<string,unknown>)['cognito:groups'];
-            if(!Array.isArray(groups) || !groups.includes('dentalems_patient')) throw new AccessError(403);
-            const pool=await platform.pools.get(tenant);
-            const result=await pool.query<{home:unknown}>('SELECT clinical.patient_portal_home($1,$2) AS home',[tenant.organizationId,claims.sub]);
-            if(result.rows[0]?.home) return send(response,200,result.rows[0].home);
-          } catch(error) { if(error instanceof AccessError) throw error; if(error instanceof Error && error.message==='Unauthorized') continue; throw error; }
-        }
-        throw new AccessError(404,'Patient profile not found');
+      if(request.method==='GET' && path==='/v1/patient/home') return send(response,200,withoutClinicId((await patientAccount(platform,token(request))).home));
+      if(request.method==='GET' && path==='/v1/patient/clinics') {
+        const account=await patientAccount(platform,token(request));
+        const current=account.tenant.bookingClinics.find(clinic=>clinic.locationId===account.home.clinic?.id)?.key;
+        const clinics=await listBookingClinics(account.pool,account.tenant.organizationId,account.tenant.bookingClinics);
+        return send(response,200,{clinics:clinics.map(clinic=>({...clinic,current:clinic.key===current}))});
+      }
+      if(request.method==='POST' && path==='/v1/patient/appointments') {
+        const account=await patientAccount(platform,token(request));
+        if(!allowBooking(`patient:${account.sub}`,'portal')) return send(response,429,{error:'Please try again later'});
+        const booking=await createPatientPortalBooking(account.pool,account.tenant,account.sub,await body(request),{ip:remoteIp(request),userAgent:String(request.headers['user-agent']??'')});
+        if(!booking) return send(response,404,{error:'Clinic not found'});
+        return send(response,201,{appointment:booking});
       }
       const patientDocumentMatch=path.match(/^\/v1\/patient\/documents\/([0-9a-f-]{36})\/download$/i);
       if(request.method==='GET' && patientDocumentMatch?.[1]) {
@@ -277,6 +301,8 @@ export function createHealthcareServer(platform:Platform):Server {
         return send(response,201,{patient:await scoped(pool,requestScopeData,()=>createPatient(payload))});
       }
       const match=path.match(/^\/v1\/patients\/([0-9a-f-]{36})(?:\/(records))?$/i);
+      const historyMatch=path.match(/^\/v1\/patients\/([0-9a-f-]{36})\/history$/i);
+      if(historyMatch?.[1] && request.method==='GET') return send(response,200,{history:await scoped(pool,requestScopeData,()=>patientHistory(historyMatch[1]!))});
       const linkMatch=path.match(/^\/v1\/patients\/([0-9a-f-]{36})\/link$/i);
       if(linkMatch?.[1] && request.method==='POST') return send(response,200,{patient:await scoped(pool,requestScopeData,()=>linkPatientToLocation(linkMatch[1]!))});
       if(match?.[1] && !match[2] && request.method==='GET') return send(response,200,{patient:await scoped(pool,requestScopeData,()=>readPatient(match[1]!))});

@@ -79,9 +79,38 @@ test('staff, patient, and admin endpoints reject a valid token without the requi
   await new Promise<void>((resolve,reject)=>server.listen(0,'127.0.0.1',error=>error?reject(error):resolve()));
   try {
     const address=server.address();if(!address||typeof address==='string')throw new Error('No address');
-    for(const path of ['/v1/patient/home','/v1/admin/clients']){
+    for(const path of ['/v1/patient/home','/v1/patient/clinics','/v1/admin/clients']){
       const response=await fetch(`http://127.0.0.1:${address.port}${path}`,{headers:{authorization:'Bearer token'}});
       assert.equal(response.status,403);
     }
+    const booking=await fetch(`http://127.0.0.1:${address.port}/v1/patient/appointments`,{method:'POST',headers:{authorization:'Bearer token','content-type':'application/json'},body:JSON.stringify({clinic:'ExampleBookingKey_123456789',appointmentType:'Cleaning'})});
+    assert.equal(booking.status,403);
   } finally {await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+});
+
+test('clinic choices are identified by booking link only, and the patient portal never sees internal clinic ids',async()=>{
+  const north='00000000-0000-4000-8000-000000000002', south='00000000-0000-4000-8000-000000000003', unlinked='00000000-0000-4000-8000-000000000004';
+  const tenant={organizationId:'00000000-0000-4000-8000-000000000001',staffUserPoolId:'us-east-1_example',staffClientId:'portal-client',bookingClinics:[{key:'NorthBookingKey_123456789',locationId:north,clinicName:'North',timezone:'America/New_York'},{key:'SouthBookingKey_123456789',locationId:south,clinicName:'South',timezone:'America/New_York'}]};
+  const mockPool={query:async(sql:string)=>{
+    if(sql.includes('booking_clinics')) return {rows:[north,south,unlinked].map((id,index)=>({location_id:id,name:['North','South','No booking link'][index],address:`${index+1} Example Street`,timezone:'America/New_York'}))};
+    if(sql.includes('patient_portal_home')) return {rows:[{home:{patient:{firstName:'Jordan'},clinic:{id:south,name:'South'},appointments:[],documents:[]}}]};
+    throw new Error(`Unexpected query: ${sql}`);
+  }};
+  const server=createHealthcareServer({
+    registry:{findBooking:async(key:string)=>key==='NorthBookingKey_123456789'?{tenant,clinic:tenant.bookingClinics[0]}:undefined,list:async()=>[tenant]},
+    pools:{get:async()=>mockPool},
+    verifierFor:()=>({verify:async()=>({sub:'patient-1',token_use:'access',client_id:'portal-client','cognito:groups':['dentalems_patient']})}),
+  } as never);
+  await new Promise<void>((resolve,reject)=>server.listen(0,'127.0.0.1',error=>error?reject(error):resolve()));
+  try {
+    const address=server.address(); if(!address || typeof address==='string') throw new Error('No test server address');
+    const url=(path:string)=>`http://127.0.0.1:${address.port}${path}`;
+    const publicList=await (await fetch(url('/v1/public/booking/NorthBookingKey_123456789/clinics'))).json() as {clinics:unknown[]};
+    assert.deepEqual(publicList.clinics,[{key:'NorthBookingKey_123456789',name:'North',address:'1 Example Street',timezone:'America/New_York'},{key:'SouthBookingKey_123456789',name:'South',address:'2 Example Street',timezone:'America/New_York'}],'a clinic without a booking link is not offered');
+    const portalList=await (await fetch(url('/v1/patient/clinics'),{headers:{authorization:'Bearer token'}})).json() as {clinics:{name:string;current:boolean}[]};
+    assert.deepEqual(portalList.clinics.map(clinic=>[clinic.name,clinic.current]),[['North',false],['South',true]]);
+    const home=await (await fetch(url('/v1/patient/home'),{headers:{authorization:'Bearer token'}})).json();
+    assert.deepEqual(home.clinic,{name:'South'});
+    for(const body of [publicList,portalList,home]) for(const id of [north,south,unlinked]) assert.ok(!JSON.stringify(body).includes(id));
+  } finally { await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve())); }
 });

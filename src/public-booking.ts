@@ -41,3 +41,34 @@ export async function createPublicBookingInquiry(pool:Pool,target:PublicBookingT
     throw error;
   } finally { client.release(); }
 }
+
+export interface ClinicChoice { key:string; name:string; address:string; timezone:string; }
+
+// The clinics a patient can choose from: the organization's active clinics that have a booking link.
+// Each is identified by its booking link, never by an internal id.
+export async function listBookingClinics(pool:Pool,organizationId:string,bookingClinics:{key:string;locationId:string}[]):Promise<ClinicChoice[]>{
+  const keys=new Map(bookingClinics.map(clinic=>[clinic.locationId,clinic.key]));
+  const result=await pool.query<{location_id:string;name:string;address:string;timezone:string}>('SELECT * FROM clinical.booking_clinics($1)',[organizationId]);
+  return result.rows.flatMap(row=>{ const key=keys.get(row.location_id); return key?[{key,name:row.name,address:row.address,timezone:row.timezone}]:[]; });
+}
+
+const portalBookingInput=z.object({
+  clinic:z.string().regex(/^[A-Za-z0-9_-]{20,128}$/),
+  appointmentType:z.string().trim().min(1).max(160),
+  preferredDate:z.string().date().optional(),
+  preferredContact:z.enum(['email','text','phone']).default('email'),
+  preferredTime:z.string().trim().max(60).optional(),
+  message:z.string().trim().max(1000).optional(),
+}).strict();
+
+// A signed-in patient asks for an appointment at the clinic they choose. They are identified by their
+// portal account, so nothing they submit is matched against other patients.
+export async function createPatientPortalBooking(pool:Pool,tenant:{organizationId:string;bookingClinics:{key:string;locationId:string}[]},sub:string,input:unknown,request:{ip?:string;userAgent:string}){
+  const booking=portalBookingInput.parse(input);
+  const clinic=tenant.bookingClinics.find(item=>item.key===booking.clinic);
+  if(!clinic) return undefined;
+  const result=await pool.query<{inquiry_id:string;clinic_name:string}>('SELECT * FROM clinical.create_patient_portal_booking($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',[
+    tenant.organizationId,sub,clinic.locationId,booking.appointmentType,booking.preferredDate??null,booking.preferredContact,booking.preferredTime??'',booking.message??'',request.ip??null,request.userAgent.slice(0,256),
+  ]);
+  return {id:result.rows[0]!.inquiry_id,clinicName:result.rows[0]!.clinic_name};
+}

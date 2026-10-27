@@ -5,10 +5,12 @@ import { AccessError, audit, context, query, requireCapability } from './context
 const uploadInput=z.object({patientId:z.string().uuid(),name:z.string().trim().min(1).max(180),contentType:z.enum(['application/pdf','image/jpeg','image/png']),sizeBytes:z.number().int().min(1).max(20_971_520),documentKind:z.enum(['intake_form','insurance_card','identity','consent','treatment','uploaded_record']).default('uploaded_record')}).strict();
 
 export async function listDocuments(patientId?:string){
-  requireCapability('documents.read');
+  const c=requireCapability('documents.read');
+  // One patient's documents come from every clinic that cared for them; the clinic-wide list is this
+  // clinic's own.
   const result=patientId
     ? await query('SELECT id,patient_id,name,content_type,size_bytes,document_kind,status,created_at FROM clinical.documents WHERE patient_id=$1 ORDER BY created_at DESC',[z.string().uuid().parse(patientId)])
-    : await query('SELECT id,patient_id,name,content_type,size_bytes,document_kind,status,created_at FROM clinical.documents ORDER BY created_at DESC LIMIT 200');
+    : await query('SELECT id,patient_id,name,content_type,size_bytes,document_kind,status,created_at FROM clinical.documents WHERE location_id=$1 ORDER BY created_at DESC LIMIT 200',[c.locationId]);
   await audit('documents.read','document');
   return result.rows;
 }

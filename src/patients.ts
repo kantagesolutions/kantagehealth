@@ -47,6 +47,24 @@ export async function linkPatientToLocation(patientId:string){
  if(!result.rows[0]?.linked) throw new AccessError(404,'Not found');
  await audit('patients.link','patient',id); return {id};
 }
+// A patient's chart across every clinic in the organization that has cared for them, each item labelled
+// with the clinic that gave it. Each part needs the capability that reads it on its own.
+export async function patientHistory(patientId:string){
+ const c=requireCapability('patients.read');
+ const id=z.string().uuid().parse(patientId);
+ const visible=await query('SELECT id FROM clinical.patients WHERE id=$1',[id]);
+ if(!visible.rowCount) throw new AccessError(404,'Not found');
+ const can=(capability:string)=>c.capabilities.includes(capability);
+ const clinics=new Map((await query<{location_id:string;name:string}>('SELECT location_id,name FROM clinical.network_clinic_names()')).rows.map(row=>[row.location_id,row.name]));
+ const read=async(capability:string,sql:string)=>can(capability)?(await query<{location_id:string}>(sql,[id])).rows.map(({location_id,...row})=>({...row,clinic:clinics.get(location_id)??'Another clinic',here:location_id===c.locationId})):[];
+ const history={
+  appointments:await read('schedule.read','SELECT id,location_id,service,start_time,status FROM clinical.appointments WHERE patient_id=$1 ORDER BY start_time DESC NULLS FIRST LIMIT 100'),
+  records:await read('clinical.read','SELECT id,location_id,record_type,note,occurred_at FROM clinical.care_records WHERE patient_id=$1 ORDER BY occurred_at DESC LIMIT 100'),
+  documents:await read('documents.read','SELECT id,location_id,name,document_kind,status,created_at FROM clinical.documents WHERE patient_id=$1 ORDER BY created_at DESC LIMIT 100'),
+  payments:await read('payments.read','SELECT id,location_id,amount_cents,description,status,created_at FROM clinical.payments WHERE patient_id=$1 ORDER BY created_at DESC LIMIT 100'),
+ };
+ await audit('records.read','patient',id); return history;
+}
 export async function listCareRecords(patientId:string){
  requireCapability('clinical.read');
  const rows=await query('SELECT id,record_type,note,provider_user_id,occurred_at FROM clinical.care_records WHERE patient_id=$1 ORDER BY occurred_at DESC LIMIT 100',[patientId]);

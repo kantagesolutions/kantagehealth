@@ -4,8 +4,10 @@ import { AccessError, audit, query, requireCapability } from './context.js';
 const appointmentInput=z.object({patientId:z.string().uuid(),providerUserId:z.string().uuid(),service:z.string().trim().min(1).max(160),startTime:z.iso.datetime({offset:true}),durationMinutes:z.number().int().min(5).max(480)}).strict();
 
 export async function listAppointments(){
-  requireCapability('schedule.read');
-  const result=await query('SELECT id,patient_id,provider_user_id,service,start_time,duration_minutes,status FROM clinical.appointments ORDER BY start_time ASC LIMIT 200');
+  const c=requireCapability('schedule.read');
+  // A linked patient's appointments at other clinics are readable for their chart, but the schedule is
+  // this clinic's own.
+  const result=await query('SELECT id,patient_id,provider_user_id,service,start_time,duration_minutes,status FROM clinical.appointments WHERE location_id=$1 ORDER BY start_time ASC LIMIT 200',[c.locationId]);
   await audit('appointments.read','appointment');
   return result.rows;
 }
