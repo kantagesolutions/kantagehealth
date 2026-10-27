@@ -10,37 +10,45 @@ export type TenantConfig=z.infer<typeof tenantEntry>;
 export type BookingClinic=z.infer<typeof bookingClinic>;
 export function staffClientIds(tenant:TenantConfig):string[] { return [...new Set([tenant.staffClientId,...(tenant.staffClientIds??[])])]; }
 
+// The API runs as several tasks over one registry secret, so no task's copy can be trusted for long. Reads
+// use a copy at most this old; a lookup that misses re-reads sooner, but no more than once a second, so
+// requests for unknown organizations or booking links cannot turn into a read of the secret each.
+const freshForMs=30_000, missRetryAfterMs=1_000;
+
 export class TenantRegistry {
-  #cache?:Promise<Map<string,TenantConfig>>;
-  constructor(private readonly client:Pick<SecretsManagerClient,'send'>,private readonly registrySecretId:string) {}
+  #cache?:{tenants:Promise<Map<string,TenantConfig>>;loadedAt:number};
+  constructor(private readonly client:Pick<SecretsManagerClient,'send'>,private readonly registrySecretId:string,private readonly now:()=>number=Date.now) {}
   async findBooking(key:string):Promise<{tenant:TenantConfig; clinic:BookingClinic}|undefined> {
-    const tenants=await (this.#cache ??= this.load());
-    for(const tenant of tenants.values()) { const clinic=tenant.bookingClinics.find(item=>item.key===key); if(clinic) return {tenant,clinic}; }
-    return undefined;
+    return this.lookup(tenants=>{
+      for(const tenant of tenants.values()) { const clinic=tenant.bookingClinics.find(item=>item.key===key); if(clinic) return {tenant,clinic}; }
+      return undefined;
+    });
   }
   async get(organizationId:string):Promise<TenantConfig> {
-    const tenants=await (this.#cache ??= this.load());
-    const tenant=tenants.get(organizationId);
+    const tenant=await this.find(organizationId);
     if(!tenant) throw new Error('Unknown or inactive healthcare organization');
     return tenant;
   }
+  async find(organizationId:string):Promise<TenantConfig|undefined> {
+    return this.lookup(tenants=>tenants.get(organizationId));
+  }
   async list():Promise<TenantConfig[]> {
-    return [...(await (this.#cache ??= this.load())).values()];
+    return [...(await this.snapshot(freshForMs)).values()];
+  }
+  // For callers that must act on the current registry, such as an authenticated administrator.
+  async refresh():Promise<TenantConfig[]> {
+    return [...(await this.snapshot(0)).values()];
   }
   async add(tenant:TenantConfig):Promise<void> {
-    const tenants=await (this.#cache ??= this.load());
-    if(tenants.has(tenant.organizationId)) throw new Error('Organization is already connected');
-    await this.client.send(new PutSecretValueCommand({SecretId:this.registrySecretId,SecretString:JSON.stringify({tenants:[...tenants.values(),tenant]})}));
-    tenants.set(tenant.organizationId,tenant);
+    await this.write(tenants=>{
+      if(tenants.has(tenant.organizationId)) throw new Error('Organization is already connected');
+      return [...tenants.values(),tenant];
+    });
   }
   // Removing an organization also retires its booking links. Removing one that is not registered is not
   // an error, so a delete can be retried after a partial failure.
   async remove(organizationId:string):Promise<void> {
-    const tenants=await (this.#cache ??= this.load());
-    if(!tenants.has(organizationId)) return;
-    const remaining=[...tenants.values()].filter(item=>item.organizationId!==organizationId);
-    await this.client.send(new PutSecretValueCommand({SecretId:this.registrySecretId,SecretString:JSON.stringify({tenants:remaining})}));
-    tenants.delete(organizationId);
+    await this.write(tenants=>tenants.has(organizationId)?[...tenants.values()].filter(item=>item.organizationId!==organizationId):undefined);
   }
   // Each clinic has its own booking link. The public booking page reads the clinic's name and timezone
   // from here, so a rename must reach the registry as well as the database.
@@ -54,12 +62,33 @@ export class TenantRegistry {
     await this.replaceBookingClinics(organizationId,clinics=>clinics.map(item=>item.locationId===locationId?{...item,...changes}:item));
   }
   private async replaceBookingClinics(organizationId:string,change:(clinics:BookingClinic[])=>BookingClinic[]):Promise<void> {
-    const tenants=await (this.#cache ??= this.load());
-    const tenant=tenants.get(organizationId);
-    if(!tenant) throw new Error('Organization is not connected');
-    const updated={...tenant,bookingClinics:change(tenant.bookingClinics)};
-    await this.client.send(new PutSecretValueCommand({SecretId:this.registrySecretId,SecretString:JSON.stringify({tenants:[...tenants.values()].map(item=>item.organizationId===organizationId?updated:item)})}));
-    tenants.set(organizationId,updated);
+    await this.write(tenants=>{
+      const tenant=tenants.get(organizationId);
+      if(!tenant) throw new Error('Organization is not connected');
+      return [...tenants.values()].map(item=>item.organizationId===organizationId?{...tenant,bookingClinics:change(tenant.bookingClinics)}:item);
+    });
+  }
+  // Every change starts from the secret as it is now, never from this task's copy: writing back an older
+  // copy would undo what another task changed since, such as an organization it just created.
+  private async write(change:(tenants:Map<string,TenantConfig>)=>TenantConfig[]|undefined):Promise<void> {
+    const updated=change(await this.snapshot(0));
+    if(!updated) return;
+    await this.client.send(new PutSecretValueCommand({SecretId:this.registrySecretId,SecretString:JSON.stringify({tenants:updated})}));
+    this.#cache={tenants:Promise.resolve(new Map(updated.map(tenant=>[tenant.organizationId,tenant]))),loadedAt:this.now()};
+  }
+  private async lookup<T>(find:(tenants:Map<string,TenantConfig>)=>T|undefined):Promise<T|undefined> {
+    return find(await this.snapshot(freshForMs)) ?? find(await this.snapshot(missRetryAfterMs));
+  }
+  private snapshot(maxAgeMs:number):Promise<Map<string,TenantConfig>> {
+    const now=this.now();
+    if(!this.#cache || now-this.#cache.loadedAt>=maxAgeMs) {
+      const tenants=this.load();
+      const entry={tenants,loadedAt:now};
+      this.#cache=entry;
+      // A failed read must not be kept: the next request tries again.
+      tenants.catch(()=>{ if(this.#cache===entry) this.#cache=undefined; });
+    }
+    return this.#cache.tenants;
   }
   private async load():Promise<Map<string,TenantConfig>> {
     const result=await this.client.send(new GetSecretValueCommand({SecretId:this.registrySecretId}));

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import test, { after, before } from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { Client, Pool } from 'pg';
-import { createClinic, createPlatformClient, deleteOrganization, deleteStaff, listClinics, listPlatformActivity, organizationRecords, setClinicStatus, setOrganizationStatus, setUserStatus, staffRecords, updateClinic, updatePlatformStaff } from '../src/platform-admin.js';
+import { createClinic, createPlatformClient, deleteOrganization, deleteStaff, listClinics, listPlatformActivity, organizationRecords, setClinicStatus, setOrganizationStatus, setUserStatus, staffRecords, updateClinic, updateOrganization, updatePlatformStaff } from '../src/platform-admin.js';
 import { createPublicBookingInquiry } from '../src/public-booking.js';
 import { registrySecretIdFrom, TenantRegistry, type TenantConfig } from '../src/tenant-registry.js';
 import { CognitoWorkforceAccountProvisioner } from '../src/workforce-accounts.js';
@@ -158,6 +158,23 @@ test('a new organization and its audit entry are committed together',async()=>{
   const entry=(await auditRows(result.organizationId)).find(row=>row.action==='organizations.create');
   assert.equal(entry?.actor,'test.admin');
   assert.equal(entry?.target_label,'Created Org');
+});
+
+test('renaming an organization keeps its System ID and records the old and new names',async()=>{
+  const registry={list:async()=>[tenant],add:async()=>undefined};
+  const created=await createPlatformClient(registry as never,pools,actor,{slug:`rename-${run}`,name:'Old Name Dental',clinicName:'Rename Clinic'});
+  await updateOrganization(tenant,pools,actor,created.organizationId,{name:'  New Name Dental  '});
+  const root=new Client({connectionString}); await root.connect();
+  try {
+    assert.deepEqual((await root.query('SELECT name,slug FROM clinical.organizations WHERE id=$1',[created.organizationId])).rows[0],{name:'New Name Dental',slug:`rename-${run}`});
+  } finally { await root.end(); }
+  const entry=(await auditRows(created.organizationId)).find(row=>row.action==='organizations.update');
+  assert.equal(entry?.actor,'test.admin');
+  assert.equal(entry?.target_label,'New Name Dental');
+  assert.deepEqual(entry?.metadata,{previous:{name:'Old Name Dental'},next:{name:'New Name Dental'}});
+  await assert.rejects(updateOrganization(tenant,pools,actor,created.organizationId,{name:'X'}));
+  await assert.rejects(updateOrganization(tenant,pools,actor,created.organizationId,{name:'Valid Name',slug:'changed'}),'the System ID cannot be sent');
+  await assert.rejects(updateOrganization(tenant,pools,actor,randomUUID(),{name:'Nobody Dental'}),/Organization not found/);
 });
 
 // Lifecycle: deleting is permanent only when nothing must be kept; anything else is archived.

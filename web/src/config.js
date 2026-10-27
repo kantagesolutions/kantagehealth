@@ -30,6 +30,7 @@ export function roleLabel(role) {
 // Plain-language wording for audit actions, so the activity feed reads as sentences.
 const actionLabels = {
   'organizations.create': 'Added organization',
+  'organizations.update': 'Edited organization',
   'organizations.suspend': 'Suspended organization',
   'organizations.activate': 'Reactivated organization',
   'organizations.archive': 'Archived organization',
