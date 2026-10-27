@@ -134,9 +134,10 @@ test('a patient booking from the portal moves to the clinic they chose; earlier 
 });
 
 test('scheduling a booking request confirms this clinic\'s requested appointment, not one at another clinic',async()=>{
-  // An older request of Una's at clinic A, with the id that sorts first.
-  const atA='00000000-0000-4000-8000-000000000000';
-  await root(client=>client.query("INSERT INTO clinical.appointments(id,organization_id,location_id,patient_id,service,status) VALUES($1,$2,$3,$4,'Exam','requested') ON CONFLICT DO NOTHING",[atA,orgId,clinicA,unaId]));
+  // An older request of Una's at clinic A, with an id that sorts before any random one. It is new for each
+  // run, so a database the tests ran against before still gets it.
+  const atA=`00000000-0000-4000-8000-${randomUUID().slice(-12)}`;
+  await root(client=>client.query("INSERT INTO clinical.appointments(id,organization_id,location_id,patient_id,service,status) VALUES($1,$2,$3,$4,'Exam','requested')",[atA,orgId,clinicA,unaId]));
   await scoped(appPool,staffB,()=>scheduleBookingInquiry(unaBooking,{startTime:'2030-01-02T15:00:00Z',durationMinutes:30}));
   const rows=await root(async client=>(await client.query<{location_id:string;status:string}>('SELECT location_id,status FROM clinical.appointments WHERE patient_id=$1 AND organization_id=$2 ORDER BY location_id',[unaId,orgId])).rows);
   assert.deepEqual(rows.map(row=>[row.location_id===clinicA?'A':'B',row.status]).sort(),[['A','requested'],['B','confirmed']],'one appointment each, none left orphaned');
