@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BellRing, CalendarDays, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { statusLabel } from './format.js';
 
 // Calendar days are written YYYY-MM-DD in the clinic's timezone, and counted as plain dates so that daylight
 // saving changes never move a day.
@@ -8,6 +9,8 @@ const asDate = key => new Date(`${key}T00:00:00Z`);
 const addDays = (key, days) => { const date = asDate(key); date.setUTCDate(date.getUTCDate() + days); return date.toISOString().slice(0, 10); };
 const dayLabel = (key, options) => asDate(key).toLocaleDateString('en-US', {timeZone: 'UTC', ...options});
 const timeLabel = (value, timeZone) => new Date(value).toLocaleTimeString('en-US', {timeZone, hour: 'numeric', minute: '2-digit'});
+// A requested date is a plain calendar day, written like every other date in the portal.
+const preferredDay = value => value ? dayLabel(String(value).slice(0, 10), {weekday: 'short', month: 'short', day: 'numeric'}) : '';
 const patientName = (patient, fallback = 'Patient') => patient ? `${patient.first_name} ${patient.last_name}` : fallback;
 // Weeks start on Sunday, as on a US wall calendar.
 const sundayOf = key => addDays(key, -asDate(key).getUTCDay());
@@ -57,6 +60,7 @@ export function TwoWeekSchedule({ request, timeZone, patientsById, onOpenPatient
       </div>
     </div>
     {error && <div className="live-error">{error}</div>}
+    <div className="schedule-body"><div className="calendar-month">
     <div className="calendar-weekdays" aria-hidden="true">{days.slice(0, 7).map(key => <span key={key}>{dayLabel(key, {weekday: 'short'})}</span>)}</div>
     <div className="calendar-days" role="group" aria-label="Choose a day">
       {days.map(key => {
@@ -72,6 +76,7 @@ export function TwoWeekSchedule({ request, timeZone, patientsById, onOpenPatient
         </button>;
       })}
     </div>
+    </div>
     <section className="calendar-day-detail" aria-live="polite">
       <h3>{selected === today ? 'Today, ' : ''}{dayLabel(selected, {weekday: 'long', month: 'long', day: 'numeric'})}</h3>
       {dayItems.length ? <div className="schedule-list">{dayItems.map(item => {
@@ -80,10 +85,10 @@ export function TwoWeekSchedule({ request, timeZone, patientsById, onOpenPatient
           <time dateTime={item.start_time}><strong>{timeLabel(item.start_time, timeZone)}</strong>{item.duration_minutes ? <small>{item.duration_minutes} min</small> : null}</time>
           <span className="schedule-dot" />
           <span className="schedule-detail"><strong>{item.service || 'Appointment'}</strong>{patient ? <button type="button" className="schedule-patient" onClick={() => onOpenPatient(patient)}>{patientName(patient)}</button> : <small>Patient</small>}</span>
-          <span className={`schedule-status status-${item.status}`}>{item.status}</span>
+          <span className={`schedule-status status-${item.status}`}>{statusLabel(item.status)}</span>
         </div>;
       })}</div> : <div className="compact-empty"><CalendarDays /><span>{loading ? 'Loading the schedule…' : 'No appointments booked for this day.'}</span></div>}
-    </section>
+    </section></div>
   </article>;
 }
 
@@ -160,7 +165,7 @@ export function AppointmentRequests({ request, requests, loaded, refresh, onSche
           <CalendarDays aria-hidden="true" />
           <span>
             <strong>{item.patient_id ? <button type="button" className="schedule-patient" onClick={() => { closePanel(); onOpenPatient({id: item.patient_id}); }}>{item.first_name} {item.last_name}</button> : `${item.first_name} ${item.last_name}`}</strong>
-            <small>{item.appointment_type} · {item.preferred_date || 'Flexible'} {item.preferred_time}</small>
+            <small>{item.appointment_type} · {preferredDay(item.preferred_date) || 'Flexible date'}{item.preferred_time ? `, ${item.preferred_time}` : ''}</small>
             <small>{item.phone} · received {new Date(item.created_at).toLocaleString('en-US', {timeZone, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}</small>
             {item.source === 'patient_portal' && <small className="booking-source">Requested from the patient portal</small>}
             {item.match_name && <span className="possible-match"><span>Possible returning patient: <strong>{item.match_name}</strong> at {item.match_clinic}, same {item.matched_on}.</span><span className="possible-match-actions"><button type="button" className="secondary" disabled={busy} onClick={() => resolve(item, true)}>Same patient</button><button type="button" className="secondary" disabled={busy} onClick={() => resolve(item, false)}>Different person</button></span></span>}
@@ -201,7 +206,7 @@ function RequestToast({ item, index, target, onOpen, onDone }) {
   useEffect(() => { if (!filing) return undefined; const timer = window.setTimeout(finish, 900); return () => window.clearTimeout(timer); }, [filing]);
   return <div ref={ref} popover="manual" role="status" className={`request-toast${filing ? ' is-filing' : ''}`} style={{'--toast-index': index}} onTransitionEnd={event => { if (filing && event.target === ref.current && event.propertyName === 'transform') finish(); }}>
     <BellRing size={18} aria-hidden="true" />
-    <div><strong>New booking request</strong><span>{item.first_name} {item.last_name} · {item.appointment_type}</span><small>{item.preferred_date || 'Flexible date'}{item.preferred_time ? ` · ${item.preferred_time}` : ''}</small></div>
+    <div><strong>New booking request</strong><span>{item.first_name} {item.last_name} · {item.appointment_type}</span><small>{preferredDay(item.preferred_date) || 'Flexible date'}{item.preferred_time ? `, ${item.preferred_time}` : ''}</small></div>
     <button type="button" className="secondary" onClick={onOpen}>View</button>
     <button type="button" className="icon-button" onClick={finish} aria-label="Dismiss notification"><X size={16} /></button>
   </div>;
