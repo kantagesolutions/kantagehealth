@@ -63,6 +63,19 @@ function VisitRow({ item }) {
   return <li className="pp-row"><DateTile value={item.startTime} /><span className="pp-row-text"><strong>{item.service}</strong><small>{item.startTime ? `${dayOf(item.startTime)} · ${timeOf(item.startTime)}` : 'Waiting for the office to choose a time'}{item.clinic ? ` · ${item.clinic}` : ''}</small></span><span className={`pp-pill status-${item.status}`}>{statusLabel(item.status)}</span></li>;
 }
 
+// Wide screens show the deck as a menu beside a detail panel instead of opening cards in place.
+const wideQuery = '(min-width: 1024px)';
+function useWide() {
+  const [wide, setWide] = useState(() => typeof window !== 'undefined' && window.matchMedia(wideQuery).matches);
+  useEffect(() => {
+    const media = window.matchMedia(wideQuery);
+    const update = () => setWide(media.matches);
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+  return wide;
+}
+
 // The patient portal as a phone app: a deck of cards, like Wallet, and a dock that opens each card.
 // Opening a card lifts it to the top and drops the others into a pile below it.
 export default function PatientPortal({ session, identity, request }) {
@@ -70,6 +83,7 @@ export default function PatientPortal({ session, identity, request }) {
   const [error, setError] = useState('');
   const [open, setOpen] = useState(null);
   const [downloading, setDownloading] = useState('');
+  const wide = useWide();
   const loadHome = () => request('/v1/patient/home').then(setHome).catch(event => setError(event.message));
   useEffect(() => { loadHome(); }, [session]);
   const choose = next => {
@@ -119,6 +133,9 @@ export default function PatientPortal({ session, identity, request }) {
   ];
   const dock = [{key: null, label: 'Home', icon: Home}, {key: 'visits', label: 'Visits', icon: CalendarDays}, {key: 'book', label: 'Book', icon: CalendarPlus}, {key: 'documents', label: 'Documents', icon: FileText}, {key: 'clinic', label: 'Clinic', icon: Building2}];
   const today = new Date().toLocaleDateString('en-US', {weekday: 'long', month: 'long', day: 'numeric'});
+  // On a wide screen one card is always shown in the panel, the next visit unless another is chosen.
+  const selected = wide ? (open || 'visits') : open;
+  const shown = cards.find(card => card.key === selected);
 
   return <div className="pp">
     <header className="pp-header">
@@ -126,12 +143,13 @@ export default function PatientPortal({ session, identity, request }) {
       <button type="button" className="pp-avatar" onClick={() => choose('clinic')} aria-label="My clinic and sign out">{(firstName || '?')[0]}</button>
     </header>
     {error && <div className="live-error pp-error">{error}</div>}
-    <main className="pp-deck" data-open={open || undefined}>
+    <main className="pp-deck" data-open={!wide && open || undefined}>
       {cards.map((card, index) => {
         const Icon = card.icon;
-        const isOpen = open === card.key;
-        return <section key={card.key} className={`pp-card pp-card-${card.key}${isOpen ? ' is-open' : ''}`} style={{'--depth': cards.length - 1 - index, viewTransitionName: `pp-card-${card.key}`}} aria-labelledby={`pp-${card.key}-title`}>
-          <button type="button" className="pp-card-head" aria-expanded={isOpen} aria-controls={`pp-${card.key}-detail`} onClick={() => choose(card.key)}>
+        const isOpen = !wide && open === card.key;
+        const isSelected = wide && selected === card.key;
+        return <section key={card.key} className={`pp-card pp-card-${card.key}${isOpen ? ' is-open' : ''}${isSelected ? ' is-selected' : ''}`} style={{'--depth': cards.length - 1 - index, viewTransitionName: `pp-card-${card.key}`}} aria-labelledby={`pp-${card.key}-title`}>
+          <button type="button" className="pp-card-head" aria-expanded={wide ? isSelected : isOpen} aria-controls={wide ? 'pp-detail' : `pp-${card.key}-detail`} onClick={() => wide ? (isSelected || choose(card.key)) : choose(card.key)}>
             <span className="pp-card-icon"><Icon size={18} /></span><span id={`pp-${card.key}-title`} className="pp-card-title">{card.label}</span>
             {isOpen ? <span className="pp-done">Done</span> : card.summary && <span className="pp-card-summary">{card.summary}</span>}
             <ChevronDown size={18} className="pp-chevron" aria-hidden="true" />
@@ -141,8 +159,15 @@ export default function PatientPortal({ session, identity, request }) {
         </section>;
       })}
     </main>
+    {wide && shown && <section className="pp-detail" id="pp-detail" aria-labelledby="pp-detail-title" aria-live="polite">
+      <div className={`pp-detail-head pp-card-${shown.key}`}>
+        <div className="pp-detail-title"><span className="pp-card-icon"><shown.icon size={22} /></span><h2 id="pp-detail-title">{shown.label}</h2></div>
+        {!['visits', 'documents'].includes(shown.key) && <div className="pp-detail-lead">{shown.body}</div>}
+      </div>
+      <div className="pp-sheet">{shown.detail}</div>
+    </section>}
     <nav className="pp-dock" aria-label="Patient portal">
-      {dock.map(({key, label, icon: Icon}) => <button type="button" key={label} className={`pp-dock-item pp-dock-${key || 'home'}`} aria-current={open === key ? 'page' : undefined} onClick={() => key === null ? (open && choose(open)) : choose(key)}>
+      {dock.map(({key, label, icon: Icon}) => <button type="button" key={label} className={`pp-dock-item pp-dock-${key || 'home'}`} aria-current={selected === key ? 'page' : undefined} onClick={() => key === null ? (open && choose(open)) : choose(key)}>
         <span className="pp-dock-icon"><Icon size={22} /></span><span className="pp-dock-label">{label}</span>
       </button>)}
     </nav>
