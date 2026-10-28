@@ -318,3 +318,32 @@
 .schedule-status.status-cancelled{color:#8b3a2b}.schedule-status.status-completed{color:#46604f}
 @media (max-width:900px){.staff-topbar{padding:10px 16px}.staff-topbar-actions{width:100%;justify-content:space-between;margin-left:0;flex-wrap:wrap}.requests-button-label,.staff-user-name small,.staff-sign-out span{display:none}.calendar-count-label{display:none}.calendar-day{min-height:58px;padding:6px}.calendar-count{text-align:center;padding:2px 4px}}
 @media (max-width:900px){.staff-topbar-actions{flex-wrap:nowrap;gap:10px}.staff-topbar-actions .staff-location{flex:1;min-width:0}.staff-topbar-actions .staff-location strong{overflow:hidden;text-overflow:ellipsis}.staff-user{padding-left:0;border-left:0;gap:6px}.staff-user-name{display:none}}
+/* One page title in both workforce portals: the page's name, a line on what it is for, its main action. */
+.page-title{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin:0 0 20px}.page-title h1{margin:0;font-family:inherit;font-size:30px;line-height:1.15;letter-spacing:normal;color:#202c29}.page-title p{margin:6px 0 0;max-width:760px;color:#55625d;font-size:15px;line-height:1.45}
+.panel-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;color:#55625d;font-size:14px}.panel-toolbar .activity-filter{margin:0 0 0 auto}
+.link-button{margin-left:6px;padding:0;border:0;background:none;color:#1d5b8c;font:inherit;font-weight:700;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+.staff-user-name strong{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.admin-topbar .platform-health{margin:0}
+/* The staff header fits on one row on a laptop; the clinic shows once, as the picker when there are several. */
+.staff-topbar .staff-top-search{flex:1 1 220px;max-width:360px}.staff-location svg{flex:none}
+@media (min-width:1101px){.staff-topbar{flex-wrap:nowrap}}
+/* The calendar beside the chosen day's appointments when there is room. */
+@media (min-width:1100px){.schedule-body{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(300px,1fr);gap:26px;align-items:start}.schedule-body .calendar-day-detail{margin-top:0;padding:0 0 0 24px;border-top:0;border-left:1px solid #e0dfd8;min-height:100%}}
+/* Admin overview: the totals, the organizations and the latest activity. */
+.admin-live-portal .admin-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.admin-live-portal .admin-grid .panel-heading{display:flex;justify-content:space-between;align-items:center;gap:12px}.admin-live-portal .admin-grid .panel-heading h2{margin:0}
+.admin-live-portal .directory-metrics:has(>article:nth-child(3):last-child){grid-template-columns:repeat(3,minmax(0,1fr))}
+.overview-list{display:grid}.overview-list>button,.overview-list>div{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 12px;align-items:center;padding:12px 2px;border:0;border-bottom:1px solid #d6d5cd;background:none;color:inherit;font:inherit;text-align:left}.overview-list>button{cursor:pointer}.overview-list>button:hover strong{text-decoration:underline}.overview-list>:last-child{border-bottom:0}.overview-list strong{font-size:15px;color:#1d2b2a}.overview-list small{grid-column:1;color:#66706c;font-size:13px}.overview-list .status,.overview-list time{grid-column:2;grid-row:1/3;color:#66706c;font-size:13px}
+@media(max-width:820px){.admin-live-portal .admin-grid{grid-template-columns:1fr}}
+/* Form fields that were left as browser defaults. */
+.admin-org-picker{display:grid;gap:6px;max-width:420px;margin-bottom:16px;color:#33413d;font-size:12px;font-weight:700}.admin-org-picker select{height:44px;padding:0 12px;border:1px solid #aeb0a7;border-radius:6px;background:#fff;color:#1d2b2a;font:inherit;font-size:14px;font-weight:600}
+.document-upload input[type=file],.patient-file-field input[type=file]{display:flex;align-items:center;font-size:13px}.document-upload input[type=file]::file-selector-button,.patient-file-field input[type=file]::file-selector-button{margin-right:12px;height:32px;padding:0 12px;border:1px solid #acada5;border-radius:6px;background:#f5f4ef;color:#273d39;font:inherit;font-weight:650;cursor:pointer}
+.patient-back-link{margin-top:0}
+/* Lists in the admin portal: the same row, buttons and badge everywhere, and status colours that mean something. */
+.admin-live-portal .admin-client-row .client-monogram{width:40px;height:40px;font-size:13px}.admin-live-portal .row-actions .secondary{height:36px;padding:0 10px;font-size:13px}
+.live-portal .status[data-status="invited"] i,.admin-live-portal .directory-panel .admin-client-row .status[data-status="invited"] i{background:#c98a1b}
+.live-portal .status[data-status="not_enabled"] i,.live-portal .status[data-status="archived"] i,.admin-live-portal .directory-panel .admin-client-row .status[data-status="archived"] i{background:#a3a8a4}
+.live-portal .status[data-status="suspended"] i,.live-portal .status[data-status="inactive"] i,.admin-live-portal .directory-panel .admin-client-row .status[data-status="suspended"] i{background:#b8442f}
+@media(max-width:700px){.admin-live-portal .admin-list .admin-client-row{grid-template-columns:42px minmax(0,1fr);gap:8px 12px}.admin-live-portal .admin-list .admin-client-row>div:nth-child(2){grid-column:2}.admin-live-portal .admin-list .admin-client-row>.status{grid-column:2;grid-row:2}.admin-live-portal .admin-list .admin-client-row>.row-actions{grid-column:1/-1;grid-row:3;display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-start}.page-title h1{font-size:25px}.page-title p{font-size:14px}}
+@media(max-width:550px){.staff-topbar .staff-top-search{flex:none;max-width:none}}
+.admin-live-portal .admin-work-area>main>.live-panel+.live-panel{margin-top:16px}.admin-live-portal .admin-client-row .status{font-size:13px;font-weight:650}.live-portal .status{text-transform:none}
+.admin-live-portal .admin-grid .panel-heading .secondary{height:34px;padding:0 12px;font-size:13px}.patient-roaming-panel form input{min-height:42px}

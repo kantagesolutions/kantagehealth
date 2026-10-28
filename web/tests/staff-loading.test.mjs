@@ -24,7 +24,8 @@ test('admin portal renders the organization directory before data loads', async 
   try {
     const { AdminPortal } = await vite.ssrLoadModule('/src/main.jsx');
     const html = renderToString(React.createElement(AdminPortal, { session: {} }));
-    assert.match(html, /Organization directory/);
+    assert.match(html, /<h1>Organizations<\/h1>/);
+    assert.match(html, /Loading organizations…/);
     assert.match(html, /Administrator navigation/);
   } finally {
     await vite.close();
