@@ -1,6 +1,15 @@
 import { z } from 'zod';
 import { AccessError, audit, context, query, requireCapability } from './context.js';
 
+// Which booking requests are waiting, by id and arrival time only, so the staff portal can check for new
+// ones every few seconds. Nothing here identifies a patient, so it is not audited; the requests themselves
+// are read, and audited, through listBookingInquiries once something new arrives.
+export async function listWaitingBookingIds(){
+  requireCapability('schedule.read');
+  const result=await query<{id:string;created_at:string}>("SELECT id,created_at FROM clinical.booking_inquiries WHERE status='new' ORDER BY created_at DESC LIMIT 200");
+  return result.rows;
+}
+
 export async function listBookingInquiries(){
   requireCapability('schedule.read');
   // A possible match may be a patient at another clinic in the organization, which row-level security

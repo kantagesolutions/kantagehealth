@@ -14,7 +14,7 @@ import { productionRegistry, staffClientIds, TenantPoolRegistry, type TenantConf
 import { createPatientPortalBooking, createPublicBookingInquiry, listBookingClinics } from './public-booking.js';
 import { listStaffWorkspaces } from './workspaces.js';
 import { clinicReports, platformReports } from './reports.js';
-import { listBookingInquiries, resolveBookingMatch, scheduleBookingInquiry } from './bookings.js';
+import { listBookingInquiries, listWaitingBookingIds, resolveBookingMatch, scheduleBookingInquiry } from './bookings.js';
 import { completeDocument, createDocumentUpload, listDocuments, patientDocumentObject } from './documents.js';
 import { CognitoPatientAccountProvisioner, savePatientInvite, type PatientAccountProvisioner } from './patient-accounts.js';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
@@ -302,7 +302,11 @@ export function createHealthcareServer(platform:Platform):Server {
         const search=new URL(request.url??'/',`http://${request.headers.host??'localhost'}`).searchParams.get('q')??'';
         return send(response,200,{patients:await scoped(pool,requestScopeData,()=>searchRoamingPatients(search))});
       }
-      if(request.method==='GET' && path==='/v1/appointments') return send(response,200,{appointments:await scoped(pool,requestScopeData,listAppointments)});
+      if(request.method==='GET' && path==='/v1/appointments') {
+        const params=new URL(request.url??'/','http://localhost').searchParams;
+        return send(response,200,{appointments:await scoped(pool,requestScopeData,()=>listAppointments({from:params.get('from'),to:params.get('to')}))});
+      }
+      if(request.method==='GET' && path==='/v1/booking-inquiries/waiting') return send(response,200,{waiting:await scoped(pool,requestScopeData,listWaitingBookingIds)});
       if(request.method==='GET' && path==='/v1/reports') return send(response,200,{report:await scoped(pool,requestScopeData,()=>clinicReports(new URL(request.url??'/','http://localhost').searchParams))});
       if(request.method==='GET' && path==='/v1/booking-inquiries') return send(response,200,{inquiries:await scoped(pool,requestScopeData,listBookingInquiries)});
       const bookingScheduleMatch=path.match(/^\/v1\/booking-inquiries\/([0-9a-f-]{36})\/schedule$/i);
