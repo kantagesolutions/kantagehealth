@@ -347,3 +347,55 @@
 @media(max-width:550px){.staff-topbar .staff-top-search{flex:none;max-width:none}}
 .admin-live-portal .admin-work-area>main>.live-panel+.live-panel{margin-top:16px}.admin-live-portal .admin-client-row .status{font-size:13px;font-weight:650}.live-portal .status{text-transform:none}
 .admin-live-portal .admin-grid .panel-heading .secondary{height:34px;padding:0 12px;font-size:13px}.patient-roaming-panel form input{min-height:42px}
+/* Patient portal: a phone app. A deck of cards like Wallet, in 3D, and a frosted dock that opens each one. */
+.pp{--pp-ink:#16202b;--pp-muted:#5d6876;--pp-strip:62px;--pp-card:206px;min-height:100vh;min-height:100dvh;padding:calc(18px + env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) calc(120px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));color:var(--pp-ink);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Inter",system-ui,sans-serif;background:radial-gradient(120% 60% at 0% 0%,#cfe6f0 0,transparent 60%),radial-gradient(90% 50% at 100% 10%,#f6dfb8 0,transparent 55%),radial-gradient(100% 60% at 50% 100%,#d8d3f2 0,transparent 60%),#eef1f4}
+.pp>*{max-width:480px;margin-inline:auto}
+.pp-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:18px;padding:0;background:none;border:0;box-shadow:none;height:auto;position:static}.pp-header small{display:block;color:var(--pp-muted);font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em}.pp-header h1{margin:2px 0 2px;font-size:34px;line-height:1.1;font-weight:800;letter-spacing:-.02em;color:var(--pp-ink)}.pp-header span{color:var(--pp-muted);font-size:14px}
+.pp-avatar{flex:none;width:44px;height:44px;border-radius:50%;border:0;background:linear-gradient(145deg,#4b6a8a,#273f5a);color:#fff;font:inherit;font-size:18px;font-weight:700;box-shadow:0 6px 16px -6px rgba(20,40,70,.6);cursor:pointer}
+.pp-error{margin-bottom:14px}
+/* The deck: each card shows its top strip over the one behind it; the last card shows whole. */
+.pp-deck{display:flex;flex-direction:column;perspective:1100px;perspective-origin:50% -20%}
+.pp-card{position:relative;display:flex;flex-direction:column;height:var(--pp-card);margin-top:calc(var(--pp-strip) - var(--pp-card));padding:0 18px 18px;border-radius:22px;overflow:hidden;color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 -2px 10px rgba(10,20,40,.10),0 22px 40px -18px rgba(10,20,40,.55);transform-origin:50% 0;translate:0 0 calc(var(--depth) * -26px);rotate:x calc(4deg + var(--depth) * 2deg);scale:1;transition:translate .45s cubic-bezier(.2,.8,.2,1),rotate .45s cubic-bezier(.2,.8,.2,1),scale .2s ease}
+.pp-card:first-child{margin-top:0}
+.pp-card:before{content:"";position:absolute;inset:0;background:linear-gradient(160deg,rgba(255,255,255,.22),transparent 40%);pointer-events:none}
+.pp-card-clinic{background:linear-gradient(150deg,#46566b,#212b38)}.pp-card-documents{background:linear-gradient(150deg,#3b78cf,#21509b)}.pp-card-book{background:linear-gradient(150deg,#f0c062,#cf8d2c);color:#2a1c05}.pp-card-visits{background:linear-gradient(150deg,#25807f,#134b57)}
+.pp-card:active{scale:.985}
+.pp-card-head{position:relative;display:flex;align-items:center;gap:10px;height:var(--pp-strip);flex:none;margin:0 -18px;padding:0 18px;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.pp-card-icon{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;background:rgba(255,255,255,.2)}.pp-card-book .pp-card-icon{background:rgba(42,28,5,.12)}
+.pp-card-title{flex:1;font-size:17px;font-weight:700}.pp-card-summary{font-size:14px;font-weight:600;opacity:.85}.pp-chevron{opacity:.7;transition:rotate .3s ease;rotate:0deg}.pp-card.is-open .pp-chevron{rotate:180deg}
+.pp-done{font-size:15px;font-weight:700;padding:5px 12px;border-radius:999px;background:rgba(255,255,255,.22)}
+.pp-card-body{position:relative}
+.pp-card-lead{margin:6px 0 0;font-size:22px;font-weight:750;line-height:1.2}.pp-card-lead small{display:block;margin-top:6px;font-size:14px;font-weight:500;opacity:.85}
+.pp-next{display:grid;margin-top:4px}.pp-next strong{font-size:30px;font-weight:800;letter-spacing:-.01em}.pp-next span{font-size:22px;font-weight:600;opacity:.92}.pp-next small{margin-top:8px;font-size:14px;opacity:.85}
+/* An open card rises to the top at full height; the rest drop into a pile below it, each still tappable. */
+.pp-deck[data-open] .pp-card{height:52px;margin-top:-8px;translate:0 0 -40px;rotate:x 10deg;scale:.96;padding-bottom:0}
+.pp-deck[data-open] .pp-card .pp-card-head{height:52px}
+.pp-deck[data-open] .pp-card .pp-card-body{display:none}
+.pp-deck[data-open] .pp-card:not(.is-open):nth-child(1 of :not(.is-open)){margin-top:16px}
+.pp-deck[data-open] .pp-card.is-open{order:-1;height:auto;min-height:var(--pp-card);margin-top:0;translate:0;rotate:x 0deg;scale:1;padding-bottom:18px}
+.pp-deck[data-open] .pp-card.is-open .pp-card-head{height:var(--pp-strip)}
+.pp-deck[data-open] .pp-card.is-open .pp-card-body{display:block}
+/* Visits and Documents list everything in the sheet, so the summary would only repeat it. */
+.pp-deck[data-open] .pp-card.is-open:is(.pp-card-visits,.pp-card-documents) .pp-card-body{display:none}
+.pp-sheet{position:relative;margin-top:16px;padding:16px;border-radius:16px;background:rgba(255,255,255,.97);color:var(--pp-ink);box-shadow:0 1px 0 rgba(255,255,255,.4)}
+.pp-sheet h3{margin:14px 0 6px;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--pp-muted)}.pp-sheet h3:first-child{margin-top:0}.pp-sheet p{margin:0 0 12px;color:#384350;line-height:1.45}
+.pp-list{list-style:none;margin:0;padding:0}.pp-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #e6e9ee}.pp-row:last-child{border-bottom:0}
+.pp-row-text strong{display:block;font-size:15px}.pp-row-text small{display:block;margin-top:2px;color:var(--pp-muted);font-size:13px;line-height:1.35}
+.pp-date-tile{display:grid;place-items:center;width:44px;height:46px;border-radius:11px;background:#fff;box-shadow:0 0 0 1px #e3e6ea,0 3px 8px -4px rgba(0,0,0,.25);overflow:hidden;text-align:center}.pp-date-tile small{display:block;width:100%;padding:2px 0;background:#e5483b;color:#fff;font-size:10px;font-weight:800;text-transform:uppercase}.pp-date-tile strong{font-size:19px;line-height:1.2;color:var(--pp-ink)}.pp-date-tile.is-waiting,.pp-date-tile.is-file{color:#21509b;background:#eaf1fb}
+.pp-pill{padding:4px 9px;border-radius:999px;background:#e6f2ec;color:#21633f;font-size:12px;font-weight:700}.pp-pill.status-requested{background:#fbf0dc;color:#8a5b0e}.pp-pill.status-cancelled{background:#f6e3e1;color:#8b3a2b}.pp-pill.status-completed{background:#eceef1;color:#4b5563}
+.pp-icon-button{display:grid;place-items:center;width:40px;height:40px;border:0;border-radius:50%;background:#eaf1fb;color:#21509b;cursor:pointer}
+.pp-safe{display:flex;gap:8px;align-items:flex-start;padding:12px;border-radius:12px;background:#f2f5f8}.pp-safe svg{flex:none;color:#8a6a1e;margin-top:1px}
+.pp-primary,.pp-secondary{display:inline-flex;justify-content:center;align-items:center;gap:8px;width:100%;min-height:48px;border:0;border-radius:14px;font:inherit;font-size:16px;font-weight:700;cursor:pointer}.pp-primary{background:#16202b;color:#fff}.pp-primary:disabled{opacity:.55}.pp-secondary{background:#eef1f4;color:var(--pp-ink)}
+.pp-form{display:grid;gap:12px}.pp-form label{display:grid;gap:6px;font-size:13px;font-weight:650;color:#384350}.pp-form small{color:var(--pp-muted);font-weight:500}.pp-form input,.pp-form select,.pp-form textarea{width:100%;min-height:46px;padding:10px 12px;border:1px solid #d5dae1;border-radius:12px;background:#f8f9fb;color:var(--pp-ink);font:inherit;font-size:16px}.pp-form textarea{min-height:84px;resize:vertical}.pp-form-pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}.pp-note{margin:0;padding:10px 12px;border-radius:10px;background:#fbf0dc;color:#6b4a0c;font-size:14px}
+/* The dock: frosted glass along the bottom, above the home indicator. */
+.pp-dock{position:fixed;left:50%;bottom:calc(10px + env(safe-area-inset-bottom));translate:-50% 0;z-index:20;display:flex;justify-content:space-around;gap:4px;width:min(calc(100% - 20px),460px);padding:10px 8px 8px;border-radius:30px;background:rgba(255,255,255,.55);-webkit-backdrop-filter:blur(22px) saturate(180%);backdrop-filter:blur(22px) saturate(180%);box-shadow:inset 0 1px 0 rgba(255,255,255,.7),0 12px 30px -10px rgba(20,30,50,.35)}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.pp-dock{background:rgba(255,255,255,.94)}}
+.pp-dock-item{position:relative;display:grid;justify-items:center;gap:4px;flex:1;min-width:0;padding:0;border:0;background:none;color:var(--pp-ink);font:inherit;cursor:pointer;scale:1;transition:scale .15s ease}.pp-dock-item:active{scale:.92}
+.pp-dock-icon{display:grid;place-items:center;width:50px;height:50px;border-radius:14px;color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 4px 10px -4px rgba(10,20,40,.45)}
+.pp-dock-home .pp-dock-icon{background:linear-gradient(150deg,#8fa3b8,#56687c)}.pp-dock-visits .pp-dock-icon{background:linear-gradient(150deg,#25807f,#134b57)}.pp-dock-book .pp-dock-icon{background:linear-gradient(150deg,#f0c062,#cf8d2c);color:#2a1c05}.pp-dock-documents .pp-dock-icon{background:linear-gradient(150deg,#3b78cf,#21509b)}.pp-dock-clinic .pp-dock-icon{background:linear-gradient(150deg,#46566b,#212b38)}
+.pp-dock-label{font-size:11px;font-weight:600;color:#2d3846}
+.pp-dock-item[aria-current="page"]:after{content:"";position:absolute;bottom:-5px;width:5px;height:5px;border-radius:50%;background:#2d3846}
+.pp-dock-item:focus-visible,.pp-card-head:focus-visible{outline:3px solid #2f6fd6;outline-offset:2px;border-radius:14px}
+::view-transition-group(*){animation-duration:.45s;animation-timing-function:cubic-bezier(.2,.8,.2,1)}
+@media (prefers-reduced-motion:reduce){.pp-card,.pp-chevron,.pp-dock-item{transition:none}}
+@media (min-width:700px){.pp{--pp-card:224px}.pp-header h1{font-size:40px}}

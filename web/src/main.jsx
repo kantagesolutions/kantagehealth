@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Activity, Building2, CalendarDays, CalendarPlus, ChartColumn, ChevronDown, CreditCard, FileText, Home, KeyRound, LogOut, MapPin, Pencil, Search, ShieldCheck, Stethoscope, Trash2, Upload, UserCheck, Users, UserX } from 'lucide-react';
+import { Activity, Building2, CalendarDays, ChartColumn, ChevronDown, CreditCard, FileText, Home, KeyRound, LogOut, MapPin, Pencil, Search, ShieldCheck, Trash2, Upload, UserCheck, Users, UserX } from 'lucide-react';
 import { beginSignIn, claims, clearSession, finishSignIn, hasGroup, sessionExpired, signOut } from './auth.js';
 import { actionLabel, apiBaseUrl, assignableRoleOptions, roleLabel, timezoneLabel, timezones } from './config.js';
 import StaffPatientProfile from './StaffPatientProfile.jsx';
 import { AppointmentRequests, TwoWeekSchedule } from './StaffDashboard.jsx';
+import PatientPortal from './PatientPortal.jsx';
 import { formatDay, formatWhen, plural, statusLabel } from './format.js';
 import './styles.css';
 
@@ -84,10 +85,6 @@ async function loadWorkspaces(session) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`${payload.error || 'Your assigned clinics could not be loaded.'}${payload.requestId?` (reference ${payload.requestId.slice(0,8)})`:''}`);
   return payload.workspaces || [];
-}
-
-function PortalHeader({ title, subtitle, tone = 'clinic' }) {
-  return <header className={`live-header ${tone}-header`}><Brand /><div><strong>{title}</strong><small>{subtitle}</small></div><button className="secondary" onClick={signOut}><LogOut size={16} /> Sign out</button></header>;
 }
 
 function PortalTabs({ items, active, onChange, tone = 'clinic' }) {
@@ -424,59 +421,9 @@ function PatientChart({ history }) {
   </div>;
 }
 
-const visitTypes = ['Checkup and cleaning', 'Tooth pain or emergency', 'Consultation', 'Follow-up visit'];
-
-// A signed-in patient asks for a visit at whichever clinic suits them. Choosing another clinic makes it
-// their clinic from then on; their history comes with them.
-function PatientBooking({ session, onBooked }) {
-  const [clinics, setClinics] = useState([]);
-  const [form, setForm] = useState({clinic: '', appointmentType: visitTypes[0], preferredDate: '', preferredTime: '', message: ''});
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
-  const loadClinics = () => portalRequest('/v1/patient/clinics', session).then(result => {
-    setClinics(result.clinics);
-    const current = result.clinics.find(clinic => clinic.current) || result.clinics[0];
-    if (current) setForm(value => ({...value, clinic: current.key}));
-  }).catch(event => setError(event.message));
-  useEffect(() => { loadClinics(); }, [session]);
-  const chosen = clinics.find(clinic => clinic.key === form.clinic);
-  const change = field => event => setForm(value => ({...value, [field]: event.target.value}));
-  const submit = async event => {
-    event.preventDefault(); setSending(true); setError(''); setNotice('');
-    const optional = Object.fromEntries(['preferredDate', 'preferredTime', 'message'].filter(field => form[field].trim()).map(field => [field, form[field].trim()]));
-    try {
-      const result = await portalRequest('/v1/patient/appointments', session, {method: 'POST', body: JSON.stringify({clinic: form.clinic, appointmentType: form.appointmentType, ...optional})});
-      setNotice(`Your request was sent to ${result.appointment.clinicName}. The office will contact you to confirm a time.`);
-      setForm(value => ({...value, preferredDate: '', preferredTime: '', message: ''}));
-      await Promise.all([loadClinics(), onBooked()]);
-    } catch (event) { setError(event.message); }
-    finally { setSending(false); }
-  };
-  return <section className="live-panel patient-booking-panel">
-    <CalendarPlus /><h2>Request an appointment</h2>
-    {error && <div className="live-error">{error}</div>}
-    {notice && <div className="live-notice">{notice}</div>}
-    {clinics.length > 0 && <form onSubmit={submit}>
-      <label className="wide">Clinic<select value={form.clinic} onChange={change('clinic')} required>{clinics.map(clinic => <option key={clinic.key} value={clinic.key}>{clinic.name}{clinic.current ? ' (your clinic)' : ''}</option>)}</select>{chosen?.address && <small>{chosen.address}</small>}</label>
-      {chosen && !chosen.current && <p className="wide booking-move-note">{chosen.name} will become your clinic. Your appointments and records come with you.</p>}
-      <label>Type of visit<select value={form.appointmentType} onChange={change('appointmentType')}>{visitTypes.map(type => <option key={type}>{type}</option>)}</select></label>
-      <label>Preferred date<input type="date" value={form.preferredDate} min={new Date().toISOString().slice(0, 10)} onChange={change('preferredDate')} /></label>
-      <label className="wide">Preferred time<input value={form.preferredTime} maxLength="60" placeholder="For example, weekday mornings" onChange={change('preferredTime')} /></label>
-      <label className="wide">Anything the office should know<textarea value={form.message} maxLength="1000" rows="3" onChange={change('message')} /></label>
-      <button className="primary wide" disabled={sending || !form.clinic}>{sending ? 'Sending…' : 'Send request'}</button>
-    </form>}
-  </section>;
-}
-
 function PatientHome({ session }) {
   const identity = claims(session);
-  const [home,setHome]=useState(null);const [error,setError]=useState('');const [downloading,setDownloading]=useState('');
-  const loadHome=()=>portalRequest('/v1/patient/home',session).then(setHome).catch(event=>setError(event.message));
-  useEffect(()=>{loadHome();},[session]);
-  const downloadDocument=async item=>{setDownloading(item.id);setError('');try{const result=await portalRequest(`/v1/patient/documents/${item.id}/download`,session);window.location.assign(result.downloadUrl);}catch(event){setError(event.message);}finally{setDownloading('');}};
-  const organizationName=home?.organization?.name; const clinicName=home?.clinic?.name;
-  return <div className="live-portal patient-live-portal"><PortalHeader title={organizationName?`${organizationName} Patient Portal`:'Patient Portal'} subtitle={identity['cognito:username'] || identity.email || clinicName || ''} /><main className="patient-home-live"><div className="patient-clinic-badge">{initialsOf(clinicName || organizationName) || <Stethoscope size={22} />}</div>{clinicName&&<div className="live-kicker">{clinicName.toUpperCase()}</div>}<h1>{home?.patient?`Welcome, ${home.patient.firstName}`:'Welcome to your patient portal'}</h1><p>Your appointments and documents from {organizationName || 'your dental office'} are kept together here, from every clinic you visit.</p>{error&&<div className="live-error">{error}</div>}<section className="patient-portal-grid"><article className="live-panel"><CalendarDays/><h2>Appointments</h2>{home?.appointments?.length?home.appointments.map(item=><div className="patient-item" key={item.id}><strong>{item.service}</strong><span>{item.startTime?formatWhen(item.startTime):'Waiting for the office to choose a time'} · {statusLabel(item.status)}{item.clinic?` · ${item.clinic}`:''}</span></div>):<p>No appointments are available yet.</p>}</article><article className="live-panel"><FileText/><h2>Documents</h2>{home?.documents?.length?home.documents.map(item=><div className="patient-item patient-document-item" key={item.id}><span><strong>{item.name}</strong><small>Shared {formatDay(item.createdAt)}</small></span><button className="secondary" type="button" onClick={()=>downloadDocument(item)} disabled={downloading===item.id}>{downloading===item.id?'Preparing…':'Download'}</button></div>):<p>No documents have been shared yet.</p>}</article></section>{home&&<PatientBooking session={session} onBooked={loadHome} />}<section className="patient-safe-card"><ShieldCheck /><div><strong>Your access is private</strong><span>This account cannot open staff or administrator records.</span></div></section></main></div>;
+  return <PatientPortal session={session} identity={identity['cognito:username'] || identity.email} request={(path, options = {}) => portalRequest(path, session, options)} />;
 }
 
 function App() {
