@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Activity, Building2, CalendarDays, ChartColumn, ChevronDown, CreditCard, FileText, Home, KeyRound, LogOut, MapPin, Pencil, Search, ShieldCheck, Trash2, Upload, UserCheck, Users, UserX } from 'lucide-react';
+import { Activity, Building2, ChartColumn, ChevronDown, Home, KeyRound, LogOut, MapPin, Pencil, Search, ShieldCheck, Trash2, UserCheck, Users, UserX } from 'lucide-react';
 import { beginSignIn, claims, clearSession, finishSignIn, hasGroup, sessionExpired, signOut } from './auth.js';
 import { actionLabel, apiBaseUrl, assignableRoleOptions, roleLabel, timezoneLabel, timezones } from './config.js';
 import StaffPatientProfile from './StaffPatientProfile.jsx';
@@ -112,11 +112,8 @@ const adminPages = {
 };
 const staffPages = {
   Dashboard: 'The next two weeks of appointments. Choose a day to see who is booked.',
-  Patients: 'Patients of this clinic. Open a name for their full profile.',
-  Appointments: 'Every visit at this clinic: requested, confirmed and completed.',
-  Documents: 'Share a PDF or image with a patient through their portal.',
-  Payments: 'Payment records and their status. Recording an amount never charges a card.',
-  Reports: 'Counts and totals for each clinic. Individual patients never appear here.',
+  Patients: 'Patients of this clinic. Open a name for their full profile and documents; search all clinics from the header.',
+  Reports: 'Appointments and payments at this clinic, and its totals for the roles that can see them. Recording a payment never charges a card.',
 };
 const staffStatusLabel = status => status === 'inactive' ? 'Suspended' : statusLabel(status);
 
@@ -249,17 +246,18 @@ export function AdminPortal({ session }) {
 
 export function StaffPortal({ session }) {
   const [active, setActive] = useState('Dashboard');
-  const [data, setData] = useState({patients: [], appointments: [], payments: [], inquiries: [], documents: []});
+  const [data, setData] = useState({patients: [], appointments: [], payments: [], inquiries: []});
   const [workspaces, setWorkspaces] = useState([]);
   const [workspace, setWorkspace] = useState(null);
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(true);
-  const [patientSearch, setPatientSearch] = useState('');
+  const [searchScope, setSearchScope] = useState('clinic');
+  const [reportTab, setReportTab] = useState('Appointments');
   const [directorySearch, setDirectorySearch] = useState('');
   const [patientMatches, setPatientMatches] = useState([]);
   const [searchingPatients, setSearchingPatients] = useState(false);
   const [error, setError] = useState('');
   const [loadingClinic,setLoadingClinic]=useState(true);
-  const [scheduleVersion,setScheduleVersion]=useState(0); const [uploadPatient,setUploadPatient]=useState(''); const [uploading,setUploading]=useState(false); const [selectedPatient,setSelectedPatient]=useState(null); const [loadingPatient,setLoadingPatient]=useState(false); const [enablingPortal,setEnablingPortal]=useState(false); const [notice,setNotice]=useState('');
+  const [scheduleVersion,setScheduleVersion]=useState(0); const [selectedPatient,setSelectedPatient]=useState(null); const [loadingPatient,setLoadingPatient]=useState(false); const [enablingPortal,setEnablingPortal]=useState(false); const [notice,setNotice]=useState('');
   const identity = claims(session);
   useEffect(() => {
     loadWorkspaces(session).then(items => {
@@ -272,30 +270,40 @@ export function StaffPortal({ session }) {
     if (!workspace) return;
     localStorage.setItem('kantage-health-staff-workspace', workspace.locationId);
     setError('');
-    setData({patients: [], appointments: [], payments: [], inquiries: [], documents: []});
+    setData({patients: [], appointments: [], payments: [], inquiries: []});
     setSelectedPatient(null);
     setLoadingClinic(true);
-    Promise.all([loadCollection('/v1/patients', session, workspace),loadCollection('/v1/appointments',session,workspace),loadCollection('/v1/payments',session,workspace),loadCollection('/v1/booking-inquiries',session,workspace),loadCollection('/v1/documents',session,workspace)]).then(([patients,appointments,payments,inquiries,documents]) => setData({patients:patients.patients,appointments:appointments.appointments,payments:payments.payments,inquiries:inquiries.inquiries,documents:documents.documents})).catch(event => setError(event.message)).finally(() => setLoadingClinic(false));
+    Promise.all([loadCollection('/v1/patients', session, workspace),loadCollection('/v1/appointments',session,workspace),loadCollection('/v1/payments',session,workspace),loadCollection('/v1/booking-inquiries',session,workspace)]).then(([patients,appointments,payments,inquiries]) => setData({patients:patients.patients,appointments:appointments.appointments,payments:payments.payments,inquiries:inquiries.inquiries})).catch(event => setError(event.message)).finally(() => setLoadingClinic(false));
   }, [session, workspace]);
   const patientsById = useMemo(() => new Map(data.patients.map(patient => [patient.id, patient])), [data.patients]);
   const requested = data.inquiries.filter(item => item.status === 'new');
-  const tabs = [{label:'Dashboard',icon:Home},{label:'Patients',icon:Users},{label:'Appointments',icon:CalendarDays},{label:'Documents',icon:FileText},{label:'Payments',icon:CreditCard},...(workspace?.roles?.some(role=>reportRoles.includes(role))?[{label:'Reports',icon:ChartColumn}]:[])];
-  const refreshClinic=async()=>{const [patients,appointments,payments,inquiries,documents]=await Promise.all([loadCollection('/v1/patients',session,workspace),loadCollection('/v1/appointments',session,workspace),loadCollection('/v1/payments',session,workspace),loadCollection('/v1/booking-inquiries',session,workspace),loadCollection('/v1/documents',session,workspace)]);setData({patients:patients.patients,appointments:appointments.appointments,payments:payments.payments,inquiries:inquiries.inquiries,documents:documents.documents});};
+  const tabs = [{label:'Dashboard',icon:Home},{label:'Patients',icon:Users},{label:'Reports',icon:ChartColumn}];
+  const canSummarize = workspace?.roles?.some(role => reportRoles.includes(role));
+  const reportTabs = ['Appointments', 'Payments', ...(canSummarize ? ['Clinic summary'] : [])];
+  const refreshClinic=async()=>{const [patients,appointments,payments,inquiries]=await Promise.all([loadCollection('/v1/patients',session,workspace),loadCollection('/v1/appointments',session,workspace),loadCollection('/v1/payments',session,workspace),loadCollection('/v1/booking-inquiries',session,workspace)]);setData({patients:patients.patients,appointments:appointments.appointments,payments:payments.payments,inquiries:inquiries.inquiries});};
   // The requests panel confirms a time; the calendar reloads so the new appointment shows on its day.
   const scheduleRequest=async(id,startTime)=>{await portalRequest(`/v1/booking-inquiries/${id}/schedule`,session,{method:'POST',body:JSON.stringify({startTime,durationMinutes:30})},workspace);await refreshClinic();setScheduleVersion(version=>version+1);};
   const refreshInquiries=async()=>{const {inquiries}=await loadCollection('/v1/booking-inquiries',session,workspace);setData(current=>({...current,inquiries}));};
   const resolveRequestMatch=async(item,samePatient)=>{await portalRequest(`/v1/booking-inquiries/${item.id}/match`,session,{method:'POST',body:JSON.stringify({samePatient})},workspace);setNotice(samePatient?`The booking was added to ${item.match_name}'s record.`:`${item.first_name} ${item.last_name} was kept as a separate patient.`);await refreshClinic();};
-  const uploadDocument=async event=>{event.preventDefault();const file=event.currentTarget.elements.document.files?.[0];if(!file||!uploadPatient)return;setUploading(true);setError('');try{const created=await portalRequest('/v1/documents/uploads',session,{method:'POST',body:JSON.stringify({patientId:uploadPatient,name:file.name,contentType:file.type,sizeBytes:file.size,documentKind:'uploaded_record'})},workspace);const uploaded=await fetch(created.document.uploadUrl,{method:'PUT',headers:{'content-type':file.type},body:file});if(!uploaded.ok)throw new Error('The file could not be uploaded.');await portalRequest(`/v1/documents/${created.document.id}/complete`,session,{method:'POST'},workspace);event.currentTarget.reset();await refreshClinic();}catch(event){setError(event.message);}finally{setUploading(false);}};
-  const findPatient = async event => {
-    event.preventDefault();
-    if (patientSearch.trim().length < 3) return;
+  const [searchedFor, setSearchedFor] = useState('');
+  const findPatient = async query => {
+    if (query.length < 3) return;
     setSearchingPatients(true);
     setError('');
     try {
-      const result = await loadCollection(`/v1/patients/search?q=${encodeURIComponent(patientSearch.trim())}`, session, workspace);
+      const result = await loadCollection(`/v1/patients/search?q=${encodeURIComponent(query)}`, session, workspace);
       setPatientMatches(result.patients || []);
+      setSearchedFor(query);
     } catch (event) { setError(event.message); }
     finally { setSearchingPatients(false); }
+  };
+  const submitSearch = event => {
+    event.preventDefault(); setSelectedPatient(null); setActive('Patients');
+    if (searchScope === 'all') findPatient(directorySearch.trim());
+  };
+  const chooseScope = scope => {
+    setSearchScope(scope); setPatientMatches([]); setSearchedFor('');
+    if (scope === 'all') { setSelectedPatient(null); setActive('Patients'); findPatient(directorySearch.trim()); }
   };
   const linkPatient = async patient => {
     setError('');
@@ -319,23 +327,33 @@ export function StaffPortal({ session }) {
     ? <div className="workforce-login login-staff"><main className="workforce-login-card"><Brand /><h1>Your clinics could not be loaded</h1><p>Your sign in worked, but the clinic list did not load. This is usually temporary.</p><p className="login-error">{error}</p><button className="primary portal-sign-in" onClick={() => window.location.reload()}>Try again</button><button className="secondary portal-sign-in" onClick={signOut}>Sign out</button></main></div>
     : <div className="workforce-login login-staff"><main className="workforce-login-card"><Brand /><h1>No clinic assigned</h1><p>Your employee account is active, but a clinic administrator has not assigned it to a practice.</p><button className="primary portal-sign-in" onClick={signOut}>Sign out</button></main></div>;
   const filtering = directorySearch.trim();
-  const patientDirectory = <section className="live-panel patient-directory-panel"><div className="panel-toolbar"><span>{filtering ? <>{plural(visiblePatients.length, 'patient')} matching “{filtering}” <button type="button" className="link-button" onClick={() => setDirectorySearch('')}>Clear search</button></> : plural(data.patients.length, 'patient')}</span></div><div className="patient-directory-list">{visiblePatients.map(patient => <article key={patient.id}><span className="patient-directory-avatar" aria-hidden="true">{patient.first_name[0]}{patient.last_name[0]}</span><div><button type="button" className="patient-directory-name" onClick={() => openPatient(patient)}>{patient.first_name} {patient.last_name}</button><small>{patient.email || 'No email supplied'} · {patient.phone}</small></div><span className="status" data-status={patient.portal_status}><i />Portal: {statusLabel(patient.portal_status || 'not_enabled')}</span><button type="button" className="secondary" onClick={() => openPatient(patient)}>Open profile</button></article>)}{!visiblePatients.length && <p className="directory-empty">{loadingClinic ? 'Loading patient records…' : data.patients.length ? 'No patients match your search.' : 'No patient records yet.'}</p>}</div></section>;
+  const patientDirectory = <section className="live-panel patient-directory-panel"><div className="panel-toolbar"><span>{filtering ? <>{plural(visiblePatients.length, 'patient')} matching “{filtering}” <button type="button" className="link-button" onClick={() => setDirectorySearch('')}>Clear search</button></> : plural(data.patients.length, 'patient')}</span></div><div className="patient-directory-list">{visiblePatients.map(patient => <article key={patient.id}><span className="patient-directory-avatar" aria-hidden="true">{patient.first_name[0]}{patient.last_name[0]}</span><div><button type="button" className="patient-directory-name" onClick={() => openPatient(patient)}>{patient.first_name} {patient.last_name}</button><small>{patient.email || 'No email supplied'} · {patient.phone}</small></div><span className="status" data-status={patient.portal_status}><i />Portal: {statusLabel(patient.portal_status || 'not_enabled')}</span><button type="button" className="secondary" onClick={() => openPatient(patient)}>Open profile</button></article>)}{!visiblePatients.length && <p className="directory-empty">{loadingClinic ? 'Loading patient records…' : data.patients.length ? 'No patients at this clinic match your search.' : 'No patient records yet.'}</p>}</div>
+    {searchScope === 'all' && <div className="other-clinics"><h2>At other clinics in {workspace.organizationName || 'the organization'}</h2>
+      {searchingPatients ? <p className="search-hint">Searching every clinic…</p>
+        : filtering.length < 3 ? <p className="search-hint">Type at least three characters and press Enter to search every clinic.</p>
+        : searchedFor !== filtering ? <p className="search-hint">Press Enter to search every clinic for “{filtering}”.</p>
+        : patientMatches.length ? <div className="patient-directory-list">{patientMatches.map(patient => <article key={patient.patient_id}><span className="patient-directory-avatar" aria-hidden="true">{patient.first_name[0]}{patient.last_name[0]}</span><div><strong className="patient-directory-name">{patient.first_name} {patient.last_name}</strong><small>{patient.email || 'No email supplied'} · {patient.phone}</small></div><span className="status" aria-hidden="true" /><button className="secondary" type="button" onClick={() => linkPatient(patient)}>Add to this clinic</button></article>)}</div>
+        : <p className="search-hint">No patient at another clinic matches “{filtering}”.</p>}
+    </div>}
+  </section>;
   const selectWorkspace = event => setWorkspace(workspaces.find(item => item.locationId === event.target.value) || workspace);
   const employeeName = workspace.staffName || identity['cognito:username'] || identity.email || 'Staff member';
   const clinicInitials = workspace.locationName.split(/\s+/).map(word => word[0]).join('').slice(0, 2).toUpperCase();
   return <div className="live-portal staff-live-portal">
     <aside className="staff-sidebar"><div className="staff-sidebar-brand"><Brand /><span>STAFF PORTAL</span></div><nav aria-label="Staff navigation">{tabs.map(({label, icon: Icon}) => <button type="button" key={label} className={active === label ? 'active' : ''} onClick={() => { setActive(label); if (label === 'Patients') setSelectedPatient(null); }}><Icon size={19}/>{label}</button>)}</nav></aside>
-    <div className="staff-work-area"><header className="staff-topbar"><form className="patient-directory-search staff-top-search" onSubmit={event => {event.preventDefault(); setSelectedPatient(null); setActive('Patients');}}><Search size={17}/><input aria-label="Search clinic patients" placeholder="Search patients by name, phone, or email" value={directorySearch} onChange={event => setDirectorySearch(event.target.value)}/><button type="submit" className="staff-search-submit">Search</button></form><div className="staff-topbar-actions"><div className="staff-location"><MapPin size={18} aria-hidden="true"/>{workspaces.length > 1 ? <label><span className="visually-hidden">Clinic</span><select value={workspace.locationId} onChange={selectWorkspace}>{workspaces.map(item => <option key={`${item.organizationId}:${item.locationId}`} value={item.locationId}>{item.locationName}</option>)}</select><ChevronDown size={17} aria-hidden="true" /></label> : <strong>{workspace.locationName}</strong>}</div><AppointmentRequests key={workspace.locationId} request={path => portalRequest(path, session, {}, workspace)} requests={requested} loaded={!loadingClinic} refresh={refreshInquiries} onSchedule={scheduleRequest} onResolve={resolveRequestMatch} onOpenPatient={openPatient} timeZone={workspace.timezone} /><SignedInUser name={employeeName} detail={workspace.roles?.length ? roleLabel(workspace.roles[0]) : 'Staff'} title={identity.email} /></div></header>
+    <div className="staff-work-area"><header className="staff-topbar"><form className="patient-directory-search staff-top-search" role="search" onSubmit={submitSearch}><Search size={17}/><input aria-label={searchScope === 'all' ? 'Search patients at every clinic' : 'Search this clinic\'s patients'} placeholder={searchScope === 'all' ? 'Search every clinic' : 'Search patients'} title="Name, phone or email" value={directorySearch} onChange={event => setDirectorySearch(event.target.value)}/><span className="search-scope" role="group" aria-label="Search in">{[['clinic', 'This clinic'], ['all', 'All clinics']].map(([scope, label]) => <button type="button" key={scope} aria-pressed={searchScope === scope} onClick={() => chooseScope(scope)}>{label}</button>)}</span></form><div className="staff-topbar-actions"><div className="staff-location"><MapPin size={18} aria-hidden="true"/>{workspaces.length > 1 ? <label><span className="visually-hidden">Clinic</span><select value={workspace.locationId} onChange={selectWorkspace}>{workspaces.map(item => <option key={`${item.organizationId}:${item.locationId}`} value={item.locationId}>{item.locationName}</option>)}</select><ChevronDown size={17} aria-hidden="true" /></label> : <strong>{workspace.locationName}</strong>}</div><AppointmentRequests key={workspace.locationId} request={path => portalRequest(path, session, {}, workspace)} requests={requested} loaded={!loadingClinic} refresh={refreshInquiries} onSchedule={scheduleRequest} onResolve={resolveRequestMatch} onOpenPatient={openPatient} timeZone={workspace.timezone} /><SignedInUser name={employeeName} detail={workspace.roles?.length ? roleLabel(workspace.roles[0]) : 'Staff'} title={identity.email} /></div></header>
     <main>{!(active === 'Patients' && selectedPatient) && <PageTitle title={active} description={staffPages[active]} />}{error && <div className="live-error">{error}</div>}{notice&&<div className="live-notice">{notice}</div>}
       {active === 'Dashboard' && <TwoWeekSchedule key={workspace.locationId} request={path => portalRequest(path, session, {}, workspace)} timeZone={workspace.timezone} patientsById={patientsById} onOpenPatient={openPatient} refreshKey={scheduleVersion} />}
       {active === 'Patients' && (selectedPatient
         ? <StaffPatientProfile patient={selectedPatient} workspace={workspace} request={(path, options) => portalRequest(path, session, options, workspace)} onBack={() => setSelectedPatient(null)} onRefresh={async () => { await refreshClinic(); await openPatient(selectedPatient); }} onEnablePortal={enablePatientPortal} onResetPortal={resetPortalLogin} enablingPortal={enablingPortal} Chart={PatientChart}/>
         : loadingPatient ? <div className="portal-loading compact-loading">Loading patient profile…</div>
-        : <>{patientDirectory}<section className="live-panel patient-roaming-panel"><div className="panel-heading"><div><h2>Find a patient at another clinic</h2><p>Search the whole organization before creating a new record. A match can be added to this clinic.</p></div></div><form onSubmit={findPatient}><input aria-label="Search organization patients" value={patientSearch} onChange={event => setPatientSearch(event.target.value)} placeholder="Name, phone, or exact email" minLength="3" /><button className="primary" type="submit" disabled={searchingPatients}>{searchingPatients ? 'Searching…' : 'Search organization'}</button></form>{patientMatches.length > 0 && <div className="roaming-results">{patientMatches.map(patient => <article key={patient.patient_id}><div><strong>{patient.first_name} {patient.last_name}</strong><small>{patient.phone} · {patient.email || 'No email'}</small></div><button className="secondary" type="button" onClick={() => linkPatient(patient)}>Add to this clinic</button></article>)}</div>}{patientSearch.length >= 3 && !searchingPatients && !patientMatches.length && <p className="search-hint">No patient at another clinic matches that search.</p>}</section></>)}
-      {active === 'Appointments' && <section className="live-panel">{appointmentTable}</section>}
-      {active === 'Documents' && <section className="live-panel"><form className="document-upload" onSubmit={uploadDocument}><label>Patient<select value={uploadPatient} onChange={event=>setUploadPatient(event.target.value)} required><option value="">Choose a patient</option>{data.patients.map(patient=><option key={patient.id} value={patient.id}>{patient.first_name} {patient.last_name}</option>)}</select></label><label>Document<input name="document" type="file" accept="application/pdf,image/jpeg,image/png" required/></label><button className="primary" disabled={uploading}><Upload size={16}/>{uploading?'Uploading…':'Send to patient portal'}</button></form><div className="responsive-table"><table><thead><tr><th>Patient</th><th>Document</th><th>Status</th><th>Added</th></tr></thead><tbody>{data.documents.map(document=>{const patient=patientsById.get(document.patient_id);return <tr key={document.id}><td>{patient?`${patient.first_name} ${patient.last_name}`:'Patient'}</td><td>{document.name}</td><td>{statusLabel(document.status)}</td><td>{formatDay(document.created_at, workspace.timezone)}</td></tr>})}{!data.documents.length&&<tr><td colSpan="4">{loadingClinic ? 'Loading documents…' : 'No documents have been shared.'}</td></tr>}</tbody></table></div></section>}
-      {active === 'Reports' && <ReportsPanel key={workspace.locationId} load={range => portalRequest(`/v1/reports?${reportQuery(range)}`, session, {}, workspace)} />}
-      {active === 'Payments' && <section className="live-panel">{paymentTable}</section>}
+        : patientDirectory)}
+            {active === 'Reports' && <>
+        <div className="report-tabs activity-filter" role="group" aria-label="Report">{reportTabs.map(tab => <button type="button" key={tab} className={reportTab === tab ? 'active' : ''} aria-pressed={reportTab === tab} onClick={() => setReportTab(tab)}>{tab}</button>)}</div>
+        {reportTab === 'Appointments' && <section className="live-panel report-appointments">{appointmentTable}</section>}
+        {reportTab === 'Payments' && <section className="live-panel report-payments">{paymentTable}</section>}
+        {reportTab === 'Clinic summary' && canSummarize && <ReportsPanel key={workspace.locationId} load={range => portalRequest(`/v1/reports?${reportQuery(range)}`, session, {}, workspace)} />}
+      </>}
     </main></div>
   </div>;
 }

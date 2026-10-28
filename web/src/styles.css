@@ -417,3 +417,36 @@
   .pp-detail .pp-sheet{margin:0;padding:26px 30px 30px;border-radius:0;background:none;box-shadow:none}
   .pp-detail .pp-form{max-width:620px}.pp-detail .pp-row{padding:14px 0}.pp-detail .pp-secondary{max-width:320px}
 }
+/* Staff portal: the patient portal's colour and depth. Panels carry a coloured edge and layered shadow;
+   calendar days and patient cards lift and tilt toward you when pointed at. */
+.staff-live-portal{--deck-teal:linear-gradient(150deg,#25807f,#134b57);--deck-blue:linear-gradient(150deg,#3b78cf,#21509b);--deck-gold:linear-gradient(150deg,#f0c062,#cf8d2c);--deck-slate:linear-gradient(150deg,#46566b,#212b38)}
+.staff-live-portal .live-panel{position:relative;overflow:hidden;border:0;border-radius:18px;background:linear-gradient(180deg,#fcfbf8,#f5f3ee);box-shadow:inset 0 1px 0 rgba(255,255,255,.9),0 0 0 1px rgba(40,55,50,.10),0 22px 40px -26px rgba(20,40,40,.55)}
+.staff-live-portal .live-panel:before{content:"";position:absolute;inset:0 0 auto;height:5px;background:var(--panel-accent,var(--deck-teal))}
+.staff-live-portal .patient-directory-panel{--panel-accent:var(--deck-blue)}.staff-live-portal .report-appointments{--panel-accent:var(--deck-teal)}.staff-live-portal .report-payments{--panel-accent:var(--deck-slate)}.staff-live-portal .reports-panel{--panel-accent:var(--deck-gold)}
+.staff-sidebar nav button.active{background:var(--deck-teal);box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 10px 18px -12px rgba(0,0,0,.7)}
+/* Calendar days: small cards in 3D; the chosen day is a teal card like the patient portal's. */
+.calendar-days{perspective:900px}
+.calendar-day{border:0;background:linear-gradient(165deg,#fff,#f2f4f2);box-shadow:inset 0 1px 0 #fff,0 0 0 1px #dde2dd,0 8px 16px -12px rgba(20,40,40,.55);transform-origin:50% 100%;translate:0;rotate:x 0deg;scale:1;transition:translate .2s ease,rotate .2s ease,box-shadow .2s ease}
+.calendar-day:hover{translate:0 -3px;rotate:x 10deg;box-shadow:inset 0 1px 0 #fff,0 0 0 1px #c9d3cf,0 14px 22px -12px rgba(20,40,40,.6)}
+.calendar-day.is-past{background:linear-gradient(165deg,#f5f5f2,#ebeae5)}
+.calendar-day[aria-pressed="true"]{background:var(--deck-teal);color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 14px 24px -12px rgba(19,75,87,.75)}
+.calendar-day[aria-pressed="true"] .calendar-count{background:rgba(255,255,255,.2);color:#fff}
+.calendar-day.is-today[aria-pressed="true"] .calendar-date{background:#fff;color:#134b57}
+.calendar-count{background:linear-gradient(150deg,#e3eefa,#d3e3f5);box-shadow:inset 0 1px 0 rgba(255,255,255,.7)}
+/* Patients: each one a card, with avatars in the deck's colours. */
+.staff-live-portal .patient-directory-list{display:grid;gap:10px;perspective:1100px}
+.staff-live-portal .patient-directory-list article{padding:12px 14px;border:0;border-radius:14px;background:#fff;box-shadow:0 0 0 1px #e3e6e1,0 10px 20px -16px rgba(20,40,40,.6);transform-origin:50% 100%;translate:0;rotate:x 0deg;transition:translate .2s ease,rotate .2s ease,box-shadow .2s ease}
+.staff-live-portal .patient-directory-list article:hover{translate:0 -2px;rotate:x 4deg;box-shadow:0 0 0 1px #d3dad6,0 16px 26px -16px rgba(20,40,40,.6)}
+.staff-live-portal .patient-directory-avatar{color:#fff;background:var(--deck-blue);box-shadow:inset 0 1px 0 rgba(255,255,255,.3)}
+.staff-live-portal .patient-directory-list article:nth-child(4n+2) .patient-directory-avatar{background:var(--deck-teal)}.staff-live-portal .patient-directory-list article:nth-child(4n+3) .patient-directory-avatar{background:var(--deck-gold);color:#2a1c05}.staff-live-portal .patient-directory-list article:nth-child(4n) .patient-directory-avatar{background:var(--deck-slate)}
+.staff-live-portal .patient-profile-avatar{background:var(--deck-teal);color:#fff}
+@media (prefers-reduced-motion:reduce){.calendar-day,.staff-live-portal .patient-directory-list article{transition:none}.calendar-day:hover,.staff-live-portal .patient-directory-list article:hover{rotate:x 0deg}}
+/* The header search covers this clinic as you type, or every clinic on Enter. */
+.staff-topbar .staff-top-search{max-width:470px}.staff-top-search input{min-width:0;flex:1}
+.search-scope{display:inline-flex;flex:none;gap:2px;padding:2px;border-radius:999px;background:#e7e6df}.search-scope button{padding:5px 10px;border:0;border-radius:999px;background:none;color:#4a5751;font:inherit;font-size:12px;font-weight:650;white-space:nowrap;cursor:pointer}.search-scope button[aria-pressed="true"]{background:#fff;color:#1d2b2a;box-shadow:0 1px 3px rgba(0,0,0,.16)}
+.other-clinics{margin-top:18px;padding-top:16px;border-top:1px dashed #cdd1ca}.other-clinics h2{margin:0 0 10px;color:#33413d;font-size:15px}
+.other-clinics .patient-directory-list article{background:linear-gradient(165deg,#fffdf7,#fbf6ea)}
+/* Reports: one switch for appointments, payments and the clinic summary. */
+.report-tabs{margin:0 0 14px}.staff-live-portal .report-tabs button.active{background:#fff;color:#134b57}
+/* Profile sections: one line under the heading; the add form is a tinted box instead of two more rules. */
+.staff-live-portal .patient-profile-section .patient-profile-form{margin:16px 0 4px;padding:14px;border:0;border-radius:12px;background:#eef3f1}.staff-live-portal .patient-profile-section .patient-profile-list{border-top:0}
