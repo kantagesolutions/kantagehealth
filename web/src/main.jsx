@@ -8,8 +8,8 @@ import { AppointmentRequests, TwoWeekSchedule } from './StaffDashboard.jsx';
 import './styles.css';
 
 // The request notifications and panel use the Popover API. Browsers without it load the polyfill; the rest
-// never download it.
-if (!('popover' in HTMLElement.prototype)) import('@oddbird/popover-polyfill');
+// never download it. The server-side render tests have no HTMLElement at all.
+if (typeof HTMLElement !== 'undefined' && !('popover' in HTMLElement.prototype)) import('@oddbird/popover-polyfill');
 
 const portalHosts = {admin: 'admin.health.kantage.solutions', staff: 'staff.health.kantage.solutions', patient: 'patient.health.kantage.solutions'};
 const apiUrl = apiBaseUrl();

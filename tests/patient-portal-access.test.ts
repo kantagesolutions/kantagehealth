@@ -57,6 +57,7 @@ test('a disabled portal account cannot be reset',async()=>{
 // Through the server, as staff would: the old account is gone from the patient pool, so reset login makes
 // a named one and records it.
 test('reset login for an account the patient pool no longer has creates one under the patient\'s name',async()=>{
+  const named=`ibrahim.barry.${run}`;
   await root(client=>client.query("UPDATE clinical.patient_portal_accounts SET status='invited',username=$2 WHERE patient_id=$1",[withAccount,`ibrahim.${run}@example.test`]));
   const invited:{lastName:string;existingUsername:unknown}[]=[];
   const tenant={organizationId:orgId,staffUserPoolId:'pool',staffClientId:'client',bookingClinics:[]};
@@ -68,7 +69,7 @@ test('reset login for an account the patient pool no longer has creates one unde
     workforceVerifier:{verify:async()=>({sub:'s',username:scope.sub,token_use:'access',client_id:'workforce-client'})},
     patientAccounts:{
       resetLogin:async()=>{ throw Object.assign(new Error('User does not exist.'),{name:'UserNotFoundException'}); },
-      invite:async(input:{lastName:string;existingUsername:unknown})=>{ invited.push(input); return {username:'ibrahim.barry',sub:`named-${run}`,emailSent:true,textSent:false}; },
+      invite:async(input:{lastName:string;existingUsername:unknown})=>{ invited.push(input); return {username:named,sub:`named-${run}`,emailSent:true,textSent:false}; },
     },
   } as never);
   await new Promise<void>((resolve,reject)=>server.listen(0,'127.0.0.1',error=>error?reject(error):resolve()));
@@ -76,8 +77,8 @@ test('reset login for an account the patient pool no longer has creates one unde
     const address=server.address(); if(!address || typeof address==='string') throw new Error('No test server address');
     const response=await fetch(`http://127.0.0.1:${address.port}/v1/patients/${withAccount}/portal-reset`,{method:'POST',headers:{authorization:'Bearer staff','x-kantage-organization':orgId,'x-kantage-location':clinic}});
     assert.equal(response.status,200);
-    assert.deepEqual(await response.json(),{portalReset:{username:'ibrahim.barry',delivery:'new_account'}});
+    assert.deepEqual(await response.json(),{portalReset:{username:named,delivery:'new_account'}});
     assert.deepEqual(invited.map(input=>[input.lastName,input.existingUsername]),[['Barry',null]]);
-    assert.deepEqual((await root(client=>client.query('SELECT username,cognito_sub FROM clinical.patient_portal_accounts WHERE patient_id=$1',[withAccount]))).rows,[{username:'ibrahim.barry',cognito_sub:`named-${run}`}]);
+    assert.deepEqual((await root(client=>client.query('SELECT username,cognito_sub FROM clinical.patient_portal_accounts WHERE patient_id=$1',[withAccount]))).rows,[{username:named,cognito_sub:`named-${run}`}]);
   } finally { await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve())); }
 });
