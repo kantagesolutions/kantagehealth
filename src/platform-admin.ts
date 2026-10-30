@@ -55,6 +55,29 @@ export async function listPlatformPatientLogins(tenant:TenantConfig,pools:Tenant
   return result.rows;
 }
 
+export async function listPlatformPatients(tenant:TenantConfig,pools:TenantPoolRegistry){
+  const result=await (await pools.get(tenant)).query('SELECT * FROM clinical.platform_patients($1)',[tenant.organizationId]);
+  return result.rows;
+}
+
+export interface PatientRecords { appointments:number; clinicalRecords:number; documents:number; billing:number; bookingRequests:number; moves:number; activePortal:number; deletable:boolean; }
+export async function patientRecords(tenant:TenantConfig,pools:TenantPoolRegistry,patientId:string):Promise<PatientRecords>{
+  const id=z.string().uuid().parse(patientId);
+  const result=await (await pools.get(tenant)).query<Record<string,string>>('SELECT * FROM clinical.platform_patient_records($1,$2)',[tenant.organizationId,id]);
+  const row=result.rows[0]??{};
+  const counts={appointments:Number(row.appointments??0),clinicalRecords:Number(row.clinical_records??0),documents:Number(row.documents??0),billing:Number(row.billing??0),bookingRequests:Number(row.booking_requests??0),moves:Number(row.moves??0),activePortal:Number(row.active_portal??0)};
+  return {...counts,deletable:Object.values(counts).every(count=>count===0)};
+}
+
+export async function deletePatient(tenant:TenantConfig,pools:TenantPoolRegistry,actor:PlatformActor,patientId:string){
+  const id=z.string().uuid().parse(patientId),org=tenant.organizationId;
+  return audited(await pools.get(tenant),actor,async client=>{
+    const result=await client.query<{name:string}>('SELECT clinical.platform_delete_patient($1,$2) AS name',[org,id]);
+    const name=result.rows[0]?.name??'';
+    return {result:{patientId:id,deleted:true},activity:{action:'patients.delete',organizationId:org,targetType:'patient',targetId:id,targetLabel:name,metadata:{safeguardsVerified:true}}};
+  });
+}
+
 async function activeIdentityCount(tenants:TenantConfig[],pools:TenantPoolRegistry,kind:'patient'|'staff',identity:string){
   let count=0; const seen=new Set<Pool>();
   for(const tenant of tenants){

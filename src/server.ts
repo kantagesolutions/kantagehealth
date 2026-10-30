@@ -19,7 +19,7 @@ import { completeDocument, createDocumentUpload, listDocuments, patientDocumentO
 import { CognitoPatientAccountProvisioner, savePatientInvite, type PatientAccountProvisioner } from './patient-accounts.js';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { assignableRoles, createClinic, createPlatformClient, createPlatformStaff, deleteOrganization, deleteStaff, listClinics, listPlatformAccess, listPlatformActivity, listPlatformClients, listPlatformPatientLogins, organizationRecords, removePatientLogin, removeStaffLogin, setClinicStatus, setOrganizationStatus, setUserStatus, staffRecords, updateClinic, updateOrganization, updatePlatformStaff, type PlatformActor } from './platform-admin.js';
+import { assignableRoles, createClinic, createPlatformClient, createPlatformStaff, deleteOrganization, deletePatient, deleteStaff, listClinics, listPlatformAccess, listPlatformActivity, listPlatformClients, listPlatformPatientLogins, listPlatformPatients, organizationRecords, patientRecords, removePatientLogin, removeStaffLogin, setClinicStatus, setOrganizationStatus, setUserStatus, staffRecords, updateClinic, updateOrganization, updatePlatformStaff, type PlatformActor } from './platform-admin.js';
 import { CognitoWorkforceAccountProvisioner, type WorkforceAccountProvisioner } from './workforce-accounts.js';
 import { CognitoIdentityRemover, type IdentityRemover } from './account-removal.js';
 
@@ -190,6 +190,21 @@ export function createHealthcareServer(platform:Platform):Server {
           const tenant=tenants.find(item=>item.organizationId===patientLoginMatch[1]); if(!tenant) throw new AccessError(404);
           if(!platform.identityRemover) throw new Error('Identity removal is unavailable');
           return send(response,200,{patient:await removePatientLogin(tenant,tenants,platform.pools,platform.identityRemover,actor,patientLoginMatch[2])});
+        }
+        const patientsMatch=path.match(/^\/v1\/admin\/clients\/([0-9a-f-]{36})\/patients$/i);
+        if(request.method==='GET'&&patientsMatch?.[1]) {
+          const tenant=tenants.find(item=>item.organizationId===patientsMatch[1]); if(!tenant) throw new AccessError(404);
+          return send(response,200,{patients:await listPlatformPatients(tenant,platform.pools)});
+        }
+        const patientRecordsMatch=path.match(/^\/v1\/admin\/clients\/([0-9a-f-]{36})\/patients\/([0-9a-f-]{36})\/records$/i);
+        if(request.method==='GET'&&patientRecordsMatch?.[1]&&patientRecordsMatch[2]) {
+          const tenant=tenants.find(item=>item.organizationId===patientRecordsMatch[1]); if(!tenant) throw new AccessError(404);
+          return send(response,200,{records:await patientRecords(tenant,platform.pools,patientRecordsMatch[2])});
+        }
+        const patientMatch=path.match(/^\/v1\/admin\/clients\/([0-9a-f-]{36})\/patients\/([0-9a-f-]{36})$/i);
+        if(request.method==='DELETE'&&patientMatch?.[1]&&patientMatch[2]) {
+          const tenant=tenants.find(item=>item.organizationId===patientMatch[1]); if(!tenant) throw new AccessError(404);
+          return send(response,200,{patient:await deletePatient(tenant,platform.pools,actor,patientMatch[2])});
         }
         const staffLoginMatch=path.match(/^\/v1\/admin\/access\/([0-9a-f-]{36})\/([0-9a-f-]{36})\/login$/i);
         if(request.method==='DELETE'&&staffLoginMatch?.[1]&&staffLoginMatch[2]) {

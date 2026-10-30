@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import test, { after, before } from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { Client, Pool } from 'pg';
-import { createClinic, createPlatformClient, deleteOrganization, deleteStaff, listClinics, listPlatformActivity, organizationRecords, removePatientLogin, removeStaffLogin, setClinicStatus, setOrganizationStatus, setUserStatus, staffRecords, updateClinic, updateOrganization, updatePlatformStaff } from '../src/platform-admin.js';
+import { createClinic, createPlatformClient, deleteOrganization, deletePatient, deleteStaff, listClinics, listPlatformActivity, listPlatformPatients, organizationRecords, patientRecords, removePatientLogin, removeStaffLogin, setClinicStatus, setOrganizationStatus, setUserStatus, staffRecords, updateClinic, updateOrganization, updatePlatformStaff } from '../src/platform-admin.js';
 import { createPublicBookingInquiry } from '../src/public-booking.js';
 import { registrySecretIdFrom, TenantRegistry, type TenantConfig } from '../src/tenant-registry.js';
 import { CognitoWorkforceAccountProvisioner } from '../src/workforce-accounts.js';
@@ -123,6 +123,45 @@ test('administrator removes a patient sign in while keeping the chart and audit 
     assert.equal((await verify.query('SELECT status FROM clinical.patient_portal_accounts WHERE patient_id=$1',[patientId])).rows[0]?.status,'disabled');
     assert.equal((await verify.query('SELECT count(*) FROM clinical.patients WHERE id=$1',[patientId])).rows[0]?.count,'1');
     assert.equal((await verify.query("SELECT count(*) FROM clinical.platform_audit_log WHERE action='patients.login_remove' AND target_id=$1",[patientId])).rows[0]?.count,'1');
+  } finally { await verify.end(); }
+});
+
+test('administrator permanently deletes only an empty patient and the audit entry survives',async()=>{
+  const patientId=randomUUID();
+  const root=new Client({connectionString}); await root.connect();
+  try {
+    await root.query("INSERT INTO clinical.patients(id,organization_id,location_id,first_name,last_name,phone,status) VALUES($1,$2,$3,'Empty','Patient','4105550101','active')",[patientId,orgId,clinicA]);
+    await root.query('INSERT INTO clinical.patient_locations(organization_id,location_id,patient_id) VALUES($1,$2,$3)',[orgId,clinicA,patientId]);
+  } finally { await root.end(); }
+  assert.ok((await listPlatformPatients(tenant,pools) as {patient_id:string}[]).some(patient=>patient.patient_id===patientId));
+  assert.equal((await patientRecords(tenant,pools,patientId)).deletable,true);
+  await deletePatient(tenant,pools,actor,patientId);
+  const verify=new Client({connectionString}); await verify.connect();
+  try {
+    assert.equal((await verify.query('SELECT 1 FROM clinical.patients WHERE id=$1',[patientId])).rowCount,0);
+    const entry=(await verify.query<{actor:string;target_label:string;metadata:Record<string,unknown>}>("SELECT actor,target_label,metadata FROM clinical.platform_audit_log WHERE action='patients.delete' AND target_id=$1",[patientId])).rows[0];
+    assert.equal(entry?.actor,'test.admin');
+    assert.equal(entry?.target_label,'Empty Patient');
+    assert.deepEqual(entry?.metadata,{safeguardsVerified:true});
+  } finally { await verify.end(); }
+});
+
+test('database refuses permanent patient deletion when a clinical dependency exists',async()=>{
+  const patientId=randomUUID(),appointmentId=randomUUID();
+  const root=new Client({connectionString}); await root.connect();
+  try {
+    await root.query("INSERT INTO clinical.patients(id,organization_id,location_id,first_name,last_name,phone,status) VALUES($1,$2,$3,'Kept','Patient','4105550102','active')",[patientId,orgId,clinicA]);
+    await root.query('INSERT INTO clinical.patient_locations(organization_id,location_id,patient_id) VALUES($1,$2,$3)',[orgId,clinicA,patientId]);
+    await root.query("INSERT INTO clinical.appointments(id,organization_id,location_id,patient_id,provider_user_id,service,start_time,duration_minutes,status) VALUES($1,$2,$3,$4,$5,'Exam',now(),30,'confirmed')",[appointmentId,orgId,clinicA,patientId,staffId]);
+  } finally { await root.end(); }
+  const records=await patientRecords(tenant,pools,patientId);
+  assert.equal(records.appointments,1);
+  assert.equal(records.deletable,false);
+  await assert.rejects(deletePatient(tenant,pools,actor,patientId),/records that must be kept/);
+  const verify=new Client({connectionString}); await verify.connect();
+  try {
+    assert.equal((await verify.query('SELECT 1 FROM clinical.patients WHERE id=$1',[patientId])).rowCount,1);
+    assert.equal((await verify.query("SELECT 1 FROM clinical.platform_audit_log WHERE action='patients.delete' AND target_id=$1",[patientId])).rowCount,0);
   } finally { await verify.end(); }
 });
 
