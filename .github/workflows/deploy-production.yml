@@ -114,7 +114,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
       - name: Set immutable image names
         run: |
-          TAG="${GITHUB_SHA}-${GITHUB_RUN_ATTEMPT}"
+          TAG="${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           echo "API_IMAGE=${{ steps.ecr.outputs.registry }}/${API_REPOSITORY}:${TAG}" >> "$GITHUB_ENV"
           echo "PORTAL_IMAGE=${{ steps.ecr.outputs.registry }}/${PORTAL_REPOSITORY}:${TAG}" >> "$GITHUB_ENV"
       - name: Build and publish API image
