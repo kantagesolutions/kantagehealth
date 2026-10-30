@@ -292,19 +292,169 @@
 .admin-live-portal{--day-border:#8c8f86;--day-divider:#b6b7ae;background:#deddd5;color:#26312e;display:grid;grid-template-columns:220px minmax(0,1fr);min-height:100vh}
 .admin-sidebar-new{background:#303b3e;color:#f6f4eb;padding:28px 18px;display:flex;flex-direction:column;gap:24px;min-height:100vh}.admin-sidebar-brand{padding:0 8px 22px;border-bottom:1px solid #758080}.admin-sidebar-brand>span{display:block;margin-top:12px;color:#dddacf;font-size:11px;letter-spacing:.13em}.admin-sidebar-new nav{display:grid;gap:5px}.admin-sidebar-new nav button{display:flex;align-items:center;gap:13px;width:100%;padding:13px 12px;border:0;border-radius:5px;background:transparent;color:#e5e9e5;font:inherit;font-size:14px;text-align:left;cursor:pointer}.admin-sidebar-new nav button:hover,.admin-sidebar-new nav button.active{background:#295e62;color:#fff}.admin-sidebar-user{margin-top:auto;padding:20px 8px 0;border-top:1px solid #758080}.admin-sidebar-user strong,.admin-sidebar-user small{display:block;overflow-wrap:anywhere}.admin-sidebar-user small{margin-top:5px;color:#cdd7d2}.admin-sidebar-user button{margin-top:13px;padding:0;border:0;background:none;color:#fff;font:inherit;font-size:12px;text-decoration:underline;cursor:pointer}.admin-work-area{min-width:0}.admin-topbar{height:72px;padding:0 30px;background:#efeee9;border-bottom:1px solid #aaa9a1;display:flex;justify-content:space-between;align-items:center;gap:16px;color:#505d58;font-size:13px}.admin-topbar span span{padding:0 8px;color:#999}.admin-live-portal .admin-work-area>main{width:auto;max-width:1500px;margin:auto;padding:26px 30px 70px}.admin-live-portal .admin-hero{background:#f8f7f3;border:1px solid #aaa99f}.admin-live-portal .live-panel,.admin-live-portal .directory-metrics{border:1px solid #a8aaa2;background:#f9f8f4;box-shadow:0 5px 15px rgba(30,35,29,.04)}.admin-live-portal .primary{background:#285c5c;border-color:#285c5c;box-shadow:0 3px 0 #204b4b}.admin-live-portal .primary:hover{background:#204b4b}.admin-live-portal .primary.danger{background:#9b2924;border-color:#84201a;box-shadow:none}.admin-live-portal .secondary{border-color:#acada5;color:#273d39;background:#f5f4ef}.admin-live-portal .secondary.danger{color:#9b2924}.admin-live-portal h1,.admin-live-portal h2,.admin-live-portal h3{font-family:inherit;letter-spacing:normal;color:#202c29}.admin-live-portal .admin-client-row{border-color:#b4b5ab}.admin-live-portal .directory-search{border-color:#aaa99f}
 @media(max-width:850px){.admin-live-portal{display:block}.admin-sidebar-new{min-height:0;padding:12px 16px;gap:10px}.admin-sidebar-brand{padding:0;border:0}.admin-sidebar-brand>span,.admin-sidebar-user{display:none}.admin-sidebar-new nav{display:flex;overflow-x:auto}.admin-sidebar-new nav button{width:auto;flex:none;padding:10px}.admin-topbar{height:auto;min-height:60px;padding:12px 18px}.admin-live-portal .admin-work-area>main{padding:20px 18px 50px}}
-
-/* Booking preferences are separate from confirmed appointment times. */
-.staff-live-portal .request-stack>.booking-request-row{grid-template-columns:24px minmax(0,1fr);align-items:start;padding:18px 0}
-.booking-request-details{min-width:0;display:grid;gap:6px}
-.booking-request-details>span{font-size:13px;color:#4e625c}
-.booking-request-details small{color:#596b64;line-height:1.4}
-.booking-preference{margin:4px 0;padding:10px 12px;border-left:4px solid #b17735;background:#f5eddf;color:#26312e;font-size:14px;line-height:1.45}
-.booking-request-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:7px}
-.booking-request-actions .primary,.booking-request-actions .secondary,.patient-booking-request .primary,.patient-booking-request .secondary{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:7px 11px;font-size:12px;text-decoration:none;white-space:nowrap}
-.staff-live-portal .inline-schedule{flex-wrap:wrap;align-items:end}
-.staff-live-portal .inline-schedule>strong,.staff-live-portal .inline-schedule>p{flex-basis:100%;margin:0}
-.staff-live-portal .inline-schedule>p{font-size:13px;color:#4e625c}
-.patient-booking-request{padding:16px 0;border-bottom:1px solid #b1b2aa}
-.patient-booking-request>strong{color:#26312e}
-.patient-booking-request p{margin:7px 0;color:#4e625c;font-size:13px}
-.patient-booking-request .primary,.patient-booking-request .secondary{margin:5px 8px 0 0}
+/* One staff header: search, then the clinic, appointment requests and the signed-in person. */
+.staff-topbar{height:auto;min-height:72px;flex-wrap:wrap;padding:12px 30px}.staff-topbar-actions{display:flex;align-items:center;gap:14px;margin-left:auto}
+.staff-user{display:flex;align-items:center;gap:10px;padding-left:14px;border-left:1px solid #c9c8c0}.staff-user-avatar{display:grid;place-items:center;width:38px;height:38px;border-radius:50%;background:#456d6b;color:#fff;font-weight:750;font-size:14px}.staff-user-name{display:grid;line-height:1.2}.staff-user-name strong{color:#1d2b2a;font-size:14px}.staff-user-name small{color:#66706c;font-size:12px}.staff-sign-out{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 10px;border:1px solid #b9b8b0;border-radius:6px;background:#fff;color:#2b3a38;font:inherit;font-size:13px;cursor:pointer}.staff-sign-out:hover{border-color:#456d6b}
+.appointment-requests-button{position:relative;display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 12px;border:1px solid #b9b8b0;border-radius:8px;background:#fff;color:#2b3a38;font:inherit;font-size:13px;font-weight:650;cursor:pointer}.appointment-requests-button:hover{border-color:#456d6b}.requests-count{min-width:22px;height:22px;padding:0 6px;border-radius:11px;display:grid;place-items:center;background:#e3e2db;color:#3d4a48;font-size:12px;font-weight:800}.appointment-requests-button.has-requests .requests-count{background:#b8442f;color:#fff}.appointment-requests-button.is-receiving{animation:requests-receive .6s ease 2}@keyframes requests-receive{50%{transform:scale(1.07);box-shadow:0 0 0 6px rgba(184,68,47,.16)}}
+.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+/* A new request: it slides in, then after a few seconds files itself into the requests button. */
+.request-toast{position:fixed;inset:auto;top:calc(86px + var(--toast-index,0) * 92px);right:24px;margin:0;width:min(380px,calc(100vw - 32px));padding:14px 14px 14px 16px;border:1px solid #d4c7b8;border-left:4px solid #b8442f;border-radius:10px;background:#fffdf8;color:#1d2b2a;box-shadow:0 18px 40px rgba(20,30,28,.18);align-items:center;gap:12px;opacity:0;transform:translateY(-10px);transition:opacity .3s ease,transform .55s cubic-bezier(.4,0,.2,1),overlay .55s allow-discrete,display .55s allow-discrete}
+.request-toast:is(:popover-open,.\:popover-open){display:flex;opacity:1;transform:none}
+@starting-style{.request-toast:is(:popover-open,.\:popover-open){opacity:0;transform:translateY(-10px)}}
+.request-toast.is-filing{opacity:0;transform:translate(var(--file-x,0),var(--file-y,0)) scale(.12)}
+.request-toast>svg{color:#b8442f;flex:none}.request-toast>div{flex:1;display:grid;gap:2px;min-width:0}.request-toast strong{font-size:14px}.request-toast span{font-size:13px;color:#3d4a48;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.request-toast small{font-size:12px;color:#66706c}.request-toast .secondary{height:34px;padding:0 12px;font-size:13px}.request-toast .icon-button{width:30px;height:30px}
+@media (prefers-reduced-motion:reduce){.request-toast,.request-toast.is-filing{transition:opacity .2s ease,overlay .2s allow-discrete,display .2s allow-discrete;transform:none}.appointment-requests-button.is-receiving{animation:none}}
+/* The waiting requests: a panel beside the page, which stays usable while it is open. */
+.appointment-requests-panel{position:fixed;inset:76px 16px auto auto;margin:0;width:min(520px,calc(100vw - 32px));max-height:calc(100vh - 96px);overflow:auto;padding:20px;border:1px solid #c9c8c0;border-radius:12px;background:#fff;color:#1d2b2a;box-shadow:0 24px 60px rgba(20,30,28,.22)}
+.appointment-requests-panel:is(:popover-open,.\:popover-open){display:block}
+.requests-panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}.requests-panel-head h2{margin:0;font-size:20px}.requests-panel-head p{margin:4px 0 0;color:#66706c;font-size:13px}
+.appointment-requests-panel .booking-stack>div{align-items:flex-start}.appointment-requests-panel .inline-schedule{flex-wrap:wrap}.schedule-patient{padding:0;border:0;background:none;color:#1d5b8c;font:inherit;font-weight:700;text-align:left;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+/* Two weeks of the schedule. */
+.two-week-schedule .panel-heading{align-items:center}.schedule-nav{display:flex;gap:8px}.schedule-nav .secondary{height:38px}.schedule-nav .icon-only{width:38px;padding:0;display:grid;place-items:center}
+.calendar-weekdays,.calendar-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}.calendar-weekdays{margin:6px 0 6px}.calendar-weekdays span{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#66706c;text-align:center}
+.calendar-day{min-height:72px;display:flex;flex-direction:column;justify-content:space-between;align-items:flex-start;padding:8px;border:1px solid #d7d6cf;border-radius:8px;background:#fff;color:#1d2b2a;font:inherit;text-align:left;cursor:pointer}.calendar-day:hover{border-color:#456d6b}.calendar-day.is-past{background:#f6f5f1;color:#7a827f}.calendar-day.is-today{border-color:#456d6b;box-shadow:inset 0 0 0 1px #456d6b}.calendar-day.is-today .calendar-date{color:#fff;background:#456d6b;border-radius:6px;padding:1px 7px}.calendar-day[aria-pressed="true"]{background:#e6efec;border-color:#2f5d5a;box-shadow:inset 0 0 0 2px #2f5d5a}
+.calendar-date{font-size:14px;font-weight:750}.calendar-count{align-self:stretch;white-space:nowrap;padding:3px 7px;border-radius:5px;background:#dfe9f3;color:#1d4e7a;font-size:12px;font-weight:750}
+.calendar-day-detail{margin-top:16px;padding-top:14px;border-top:1px solid #e0dfd8}.calendar-day-detail h3{margin:0 0 10px;font-size:16px}.calendar-day-detail time small{display:block;color:#66706c;font-size:11px}
+.schedule-status.status-cancelled{color:#8b3a2b}.schedule-status.status-completed{color:#46604f}
+@media (max-width:900px){.staff-topbar{padding:10px 16px}.staff-topbar-actions{width:100%;justify-content:space-between;margin-left:0;flex-wrap:wrap}.requests-button-label,.staff-user-name small,.staff-sign-out span{display:none}.calendar-count-label{display:none}.calendar-day{min-height:58px;padding:6px}.calendar-count{text-align:center;padding:2px 4px}}
+@media (max-width:900px){.staff-topbar-actions{flex-wrap:nowrap;gap:10px}.staff-topbar-actions .staff-location{flex:1;min-width:0}.staff-topbar-actions .staff-location strong{overflow:hidden;text-overflow:ellipsis}.staff-user{padding-left:0;border-left:0;gap:6px}.staff-user-name{display:none}}
+/* One page title in both workforce portals: the page's name, a line on what it is for, its main action. */
+.page-title{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin:0 0 20px}.page-title h1{margin:0;font-family:inherit;font-size:30px;line-height:1.15;letter-spacing:normal;color:#202c29}.page-title p{margin:6px 0 0;max-width:760px;color:#55625d;font-size:15px;line-height:1.45}
+.panel-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;color:#55625d;font-size:14px}.panel-toolbar .activity-filter{margin:0 0 0 auto}
+.link-button{margin-left:6px;padding:0;border:0;background:none;color:#1d5b8c;font:inherit;font-weight:700;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+.staff-user-name strong{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.admin-topbar .platform-health{margin:0}
+/* The staff header fits on one row on a laptop; the clinic shows once, as the picker when there are several. */
+.staff-topbar .staff-top-search{flex:1 1 220px;max-width:360px}.staff-location svg{flex:none}
+@media (min-width:1101px){.staff-topbar{flex-wrap:nowrap}}
+/* The calendar beside the chosen day's appointments when there is room. */
+@media (min-width:1100px){.schedule-body{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(300px,1fr);gap:26px;align-items:start}.schedule-body .calendar-day-detail{margin-top:0;padding:0 0 0 24px;border-top:0;border-left:1px solid #e0dfd8;min-height:100%}}
+/* Admin overview: the totals, the organizations and the latest activity. */
+.admin-live-portal .admin-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.admin-live-portal .admin-grid .panel-heading{display:flex;justify-content:space-between;align-items:center;gap:12px}.admin-live-portal .admin-grid .panel-heading h2{margin:0}
+.admin-live-portal .directory-metrics:has(>article:nth-child(3):last-child){grid-template-columns:repeat(3,minmax(0,1fr))}
+.overview-list{display:grid}.overview-list>button,.overview-list>div{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 12px;align-items:center;padding:12px 2px;border:0;border-bottom:1px solid #d6d5cd;background:none;color:inherit;font:inherit;text-align:left}.overview-list>button{cursor:pointer}.overview-list>button:hover strong{text-decoration:underline}.overview-list>:last-child{border-bottom:0}.overview-list strong{font-size:15px;color:#1d2b2a}.overview-list small{grid-column:1;color:#66706c;font-size:13px}.overview-list .status,.overview-list time{grid-column:2;grid-row:1/3;color:#66706c;font-size:13px}
+@media(max-width:820px){.admin-live-portal .admin-grid{grid-template-columns:1fr}}
+/* Form fields that were left as browser defaults. */
+.admin-org-picker{display:grid;gap:6px;max-width:420px;margin-bottom:16px;color:#33413d;font-size:12px;font-weight:700}.admin-org-picker select{height:44px;padding:0 12px;border:1px solid #aeb0a7;border-radius:6px;background:#fff;color:#1d2b2a;font:inherit;font-size:14px;font-weight:600}
+.document-upload input[type=file],.patient-file-field input[type=file]{display:flex;align-items:center;font-size:13px}.document-upload input[type=file]::file-selector-button,.patient-file-field input[type=file]::file-selector-button{margin-right:12px;height:32px;padding:0 12px;border:1px solid #acada5;border-radius:6px;background:#f5f4ef;color:#273d39;font:inherit;font-weight:650;cursor:pointer}
+.patient-back-link{margin-top:0}
+/* Lists in the admin portal: the same row, buttons and badge everywhere, and status colours that mean something. */
+.admin-live-portal .admin-client-row .client-monogram{width:40px;height:40px;font-size:13px}.admin-live-portal .row-actions .secondary{height:36px;padding:0 10px;font-size:13px}
+.live-portal .status[data-status="invited"] i,.admin-live-portal .directory-panel .admin-client-row .status[data-status="invited"] i{background:#c98a1b}
+.live-portal .status[data-status="not_enabled"] i,.live-portal .status[data-status="archived"] i,.admin-live-portal .directory-panel .admin-client-row .status[data-status="archived"] i{background:#a3a8a4}
+.live-portal .status[data-status="suspended"] i,.live-portal .status[data-status="inactive"] i,.admin-live-portal .directory-panel .admin-client-row .status[data-status="suspended"] i{background:#b8442f}
+@media(max-width:700px){.admin-live-portal .admin-list .admin-client-row{grid-template-columns:42px minmax(0,1fr);gap:8px 12px}.admin-live-portal .admin-list .admin-client-row>div:nth-child(2){grid-column:2}.admin-live-portal .admin-list .admin-client-row>.status{grid-column:2;grid-row:2}.admin-live-portal .admin-list .admin-client-row>.row-actions{grid-column:1/-1;grid-row:3;display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-start}.page-title h1{font-size:25px}.page-title p{font-size:14px}}
+@media(max-width:550px){.staff-topbar .staff-top-search{flex:none;max-width:none}}
+.admin-live-portal .admin-work-area>main>.live-panel+.live-panel{margin-top:16px}.admin-live-portal .admin-client-row .status{font-size:13px;font-weight:650}.live-portal .status{text-transform:none}
+.admin-live-portal .admin-grid .panel-heading .secondary{height:34px;padding:0 12px;font-size:13px}.patient-roaming-panel form input{min-height:42px}
+/* Patient portal: a phone app. A deck of cards like Wallet, in 3D, and a frosted dock that opens each one. */
+.pp{--pp-ink:#16202b;--pp-muted:#5d6876;--pp-strip:62px;--pp-card:206px;min-height:100vh;min-height:100dvh;padding:calc(18px + env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) calc(120px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));color:var(--pp-ink);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Inter",system-ui,sans-serif;background:radial-gradient(120% 60% at 0% 0%,#cfe6f0 0,transparent 60%),radial-gradient(90% 50% at 100% 10%,#f6dfb8 0,transparent 55%),radial-gradient(100% 60% at 50% 100%,#d8d3f2 0,transparent 60%),#eef1f4}
+.pp>*{max-width:480px;margin-inline:auto}
+.pp-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:18px;padding:0;background:none;border:0;box-shadow:none;height:auto;position:static}.pp-header small{display:block;color:var(--pp-muted);font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em}.pp-header h1{margin:2px 0 2px;font-size:34px;line-height:1.1;font-weight:800;letter-spacing:-.02em;color:var(--pp-ink)}.pp-header span{color:var(--pp-muted);font-size:14px}
+.pp-avatar{flex:none;width:44px;height:44px;border-radius:50%;border:0;background:linear-gradient(145deg,#4b6a8a,#273f5a);color:#fff;font:inherit;font-size:18px;font-weight:700;box-shadow:0 6px 16px -6px rgba(20,40,70,.6);cursor:pointer}
+.pp-error{margin-bottom:14px}
+/* The deck: each card shows its top strip over the one behind it; the last card shows whole. */
+.pp-deck{display:flex;flex-direction:column;perspective:1100px;perspective-origin:50% -20%}
+.pp-card{position:relative;display:flex;flex-direction:column;height:var(--pp-card);margin-top:calc(var(--pp-strip) - var(--pp-card));padding:0 18px 18px;border-radius:22px;overflow:hidden;color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 -2px 10px rgba(10,20,40,.10),0 22px 40px -18px rgba(10,20,40,.55);transform-origin:50% 0;translate:0 0 calc(var(--depth) * -26px);rotate:x calc(4deg + var(--depth) * 2deg);scale:1;transition:translate .45s cubic-bezier(.2,.8,.2,1),rotate .45s cubic-bezier(.2,.8,.2,1),scale .2s ease}
+.pp-card:first-child{margin-top:0}
+.pp-card:before{content:"";position:absolute;inset:0;background:linear-gradient(160deg,rgba(255,255,255,.22),transparent 40%);pointer-events:none}
+.pp-card-clinic{background:linear-gradient(150deg,#46566b,#212b38)}.pp-card-documents{background:linear-gradient(150deg,#3b78cf,#21509b)}.pp-card-book{background:linear-gradient(150deg,#f0c062,#cf8d2c);color:#2a1c05}.pp-card-visits{background:linear-gradient(150deg,#25807f,#134b57)}
+.pp-card:active{scale:.985}
+.pp-card-head{position:relative;display:flex;align-items:center;gap:10px;height:var(--pp-strip);flex:none;margin:0 -18px;padding:0 18px;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.pp-card-icon{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;background:rgba(255,255,255,.2)}.pp-card-book .pp-card-icon{background:rgba(42,28,5,.12)}
+.pp-card-title{flex:1;font-size:17px;font-weight:700}.pp-card-summary{font-size:14px;font-weight:600;opacity:.85}.pp-chevron{opacity:.7;transition:rotate .3s ease;rotate:0deg}.pp-card.is-open .pp-chevron{rotate:180deg}
+.pp-done{font-size:15px;font-weight:700;padding:5px 12px;border-radius:999px;background:rgba(255,255,255,.22)}
+.pp-card-body{position:relative}
+.pp-card-lead{margin:6px 0 0;font-size:22px;font-weight:750;line-height:1.2}.pp-card-lead small{display:block;margin-top:6px;font-size:14px;font-weight:500;opacity:.85}
+.pp-next{display:grid;margin-top:4px}.pp-next strong{font-size:30px;font-weight:800;letter-spacing:-.01em}.pp-next span{font-size:22px;font-weight:600;opacity:.92}.pp-next small{margin-top:8px;font-size:14px;opacity:.85}
+/* An open card rises to the top at full height; the rest drop into a pile below it, each still tappable. */
+.pp-deck[data-open] .pp-card{height:52px;margin-top:-8px;translate:0 0 -40px;rotate:x 10deg;scale:.96;padding-bottom:0}
+.pp-deck[data-open] .pp-card .pp-card-head{height:52px}
+.pp-deck[data-open] .pp-card .pp-card-body{display:none}
+.pp-deck[data-open] .pp-card:not(.is-open):nth-child(1 of :not(.is-open)){margin-top:16px}
+.pp-deck[data-open] .pp-card.is-open{order:-1;height:auto;min-height:var(--pp-card);margin-top:0;translate:0;rotate:x 0deg;scale:1;padding-bottom:18px}
+.pp-deck[data-open] .pp-card.is-open .pp-card-head{height:var(--pp-strip)}
+.pp-deck[data-open] .pp-card.is-open .pp-card-body{display:block}
+/* Visits and Documents list everything in the sheet, so the summary would only repeat it. */
+.pp-deck[data-open] .pp-card.is-open:is(.pp-card-visits,.pp-card-documents) .pp-card-body{display:none}
+.pp-sheet{position:relative;margin-top:16px;padding:16px;border-radius:16px;background:rgba(255,255,255,.97);color:var(--pp-ink);box-shadow:0 1px 0 rgba(255,255,255,.4)}
+.pp-sheet h3{margin:14px 0 6px;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--pp-muted)}.pp-sheet h3:first-child{margin-top:0}.pp-sheet p{margin:0 0 12px;color:#384350;line-height:1.45}
+.pp-list{list-style:none;margin:0;padding:0}.pp-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #e6e9ee}.pp-row:last-child{border-bottom:0}
+.pp-row-text strong{display:block;font-size:15px}.pp-row-text small{display:block;margin-top:2px;color:var(--pp-muted);font-size:13px;line-height:1.35}
+.pp-date-tile{display:grid;place-items:center;width:44px;height:46px;border-radius:11px;background:#fff;box-shadow:0 0 0 1px #e3e6ea,0 3px 8px -4px rgba(0,0,0,.25);overflow:hidden;text-align:center}.pp-date-tile small{display:block;width:100%;padding:2px 0;background:#e5483b;color:#fff;font-size:10px;font-weight:800;text-transform:uppercase}.pp-date-tile strong{font-size:19px;line-height:1.2;color:var(--pp-ink)}.pp-date-tile.is-waiting,.pp-date-tile.is-file{color:#21509b;background:#eaf1fb}
+.pp-pill{padding:4px 9px;border-radius:999px;background:#e6f2ec;color:#21633f;font-size:12px;font-weight:700}.pp-pill.status-requested{background:#fbf0dc;color:#8a5b0e}.pp-pill.status-cancelled{background:#f6e3e1;color:#8b3a2b}.pp-pill.status-completed{background:#eceef1;color:#4b5563}
+.pp-icon-button{display:grid;place-items:center;width:40px;height:40px;border:0;border-radius:50%;background:#eaf1fb;color:#21509b;cursor:pointer}
+.pp-safe{display:flex;gap:8px;align-items:flex-start;padding:12px;border-radius:12px;background:#f2f5f8}.pp-safe svg{flex:none;color:#8a6a1e;margin-top:1px}
+.pp-primary,.pp-secondary{display:inline-flex;justify-content:center;align-items:center;gap:8px;width:100%;min-height:48px;border:0;border-radius:14px;font:inherit;font-size:16px;font-weight:700;cursor:pointer}.pp-primary{background:#16202b;color:#fff}.pp-primary:disabled{opacity:.55}.pp-secondary{background:#eef1f4;color:var(--pp-ink)}
+.pp-form{display:grid;gap:12px}.pp-form label{display:grid;gap:6px;font-size:13px;font-weight:650;color:#384350}.pp-form small{color:var(--pp-muted);font-weight:500}.pp-form input,.pp-form select,.pp-form textarea{width:100%;min-height:46px;padding:10px 12px;border:1px solid #d5dae1;border-radius:12px;background:#f8f9fb;color:var(--pp-ink);font:inherit;font-size:16px}.pp-form textarea{min-height:84px;resize:vertical}.pp-form-pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}.pp-note{margin:0;padding:10px 12px;border-radius:10px;background:#fbf0dc;color:#6b4a0c;font-size:14px}
+/* The dock: frosted glass along the bottom, above the home indicator. */
+.pp-dock{position:fixed;left:50%;bottom:calc(10px + env(safe-area-inset-bottom));translate:-50% 0;z-index:20;display:flex;justify-content:space-around;gap:4px;width:min(calc(100% - 20px),460px);padding:10px 8px 8px;border-radius:30px;background:rgba(255,255,255,.55);-webkit-backdrop-filter:blur(22px) saturate(180%);backdrop-filter:blur(22px) saturate(180%);box-shadow:inset 0 1px 0 rgba(255,255,255,.7),0 12px 30px -10px rgba(20,30,50,.35)}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.pp-dock{background:rgba(255,255,255,.94)}}
+.pp-dock-item{position:relative;display:grid;justify-items:center;gap:4px;flex:1;min-width:0;padding:0;border:0;background:none;color:var(--pp-ink);font:inherit;cursor:pointer;scale:1;transition:scale .15s ease}.pp-dock-item:active{scale:.92}
+.pp-dock-icon{display:grid;place-items:center;width:50px;height:50px;border-radius:14px;color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 4px 10px -4px rgba(10,20,40,.45)}
+.pp-dock-home .pp-dock-icon{background:linear-gradient(150deg,#8fa3b8,#56687c)}.pp-dock-visits .pp-dock-icon{background:linear-gradient(150deg,#25807f,#134b57)}.pp-dock-book .pp-dock-icon{background:linear-gradient(150deg,#f0c062,#cf8d2c);color:#2a1c05}.pp-dock-documents .pp-dock-icon{background:linear-gradient(150deg,#3b78cf,#21509b)}.pp-dock-clinic .pp-dock-icon{background:linear-gradient(150deg,#46566b,#212b38)}
+.pp-dock-label{font-size:11px;font-weight:600;color:#2d3846}
+.pp-dock-item[aria-current="page"]:after{content:"";position:absolute;bottom:-5px;width:5px;height:5px;border-radius:50%;background:#2d3846}
+.pp-dock-item:focus-visible,.pp-card-head:focus-visible{outline:3px solid #2f6fd6;outline-offset:2px;border-radius:14px}
+::view-transition-group(*){animation-duration:.45s;animation-timing-function:cubic-bezier(.2,.8,.2,1)}
+@media (prefers-reduced-motion:reduce){.pp-card,.pp-chevron,.pp-dock-item{transition:none}}
+@media (min-width:700px){.pp{--pp-card:224px}.pp-header h1{font-size:40px}}
+/* Wide screens: the deck becomes the menu on the left, the chosen card fills a panel on the right, and the
+   dock sits in the header. Phones keep the deck that opens in place. */
+@media (min-width:1024px){
+  .pp{display:grid;grid-template-columns:400px minmax(0,1fr);grid-template-areas:"head dock" "error error" "deck detail";grid-template-rows:auto auto 1fr;align-content:start;column-gap:44px;row-gap:26px;align-items:start;padding:32px max(40px,calc((100vw - 1240px) / 2)) 56px}
+  .pp>*{max-width:none;margin-inline:0}
+  .pp-header{grid-area:head;margin:0;align-self:center}.pp-avatar{display:none}
+  .pp-error{grid-area:error;margin:0}
+  .pp-dock{grid-area:dock;position:static;translate:none;justify-self:end;align-self:center;width:auto;padding:8px 10px;gap:4px;border-radius:22px}
+  .pp-dock-item{flex:none;width:78px}.pp-dock-icon{width:42px;height:42px;border-radius:12px}.pp-dock-home{display:none}
+  .pp-dock-item[aria-current="page"]:after{bottom:-6px}
+  .pp-deck{grid-area:deck;position:sticky;top:32px}
+  .pp-card.is-selected{translate:18px 0 calc(var(--depth) * -26px);box-shadow:inset 0 0 0 2px rgba(255,255,255,.75),0 -2px 10px rgba(10,20,40,.10),0 22px 40px -18px rgba(10,20,40,.55)}
+  .pp-detail{grid-area:detail;overflow:hidden;border-radius:26px;background:rgba(255,255,255,.82);-webkit-backdrop-filter:blur(20px) saturate(160%);backdrop-filter:blur(20px) saturate(160%);box-shadow:inset 0 0 0 1px rgba(255,255,255,.6),0 24px 50px -24px rgba(20,30,50,.45)}
+  .pp-detail-head{position:relative;padding:24px 30px;color:#fff}.pp-detail-head.pp-card-book{color:#2a1c05}.pp-detail-title{display:flex;align-items:center;gap:14px}.pp-detail-head .pp-card-icon{width:42px;height:42px;border-radius:12px}.pp-detail-head h2{margin:0;color:inherit;font-size:28px;font-weight:800;letter-spacing:-.01em}
+  .pp-detail-lead{margin-top:16px}.pp-detail-lead .pp-card-lead{margin:0}
+  .pp-detail .pp-sheet{margin:0;padding:26px 30px 30px;border-radius:0;background:none;box-shadow:none}
+  .pp-detail .pp-form{max-width:620px}.pp-detail .pp-row{padding:14px 0}.pp-detail .pp-secondary{max-width:320px}
+}
+/* Staff portal: the patient portal's colour and depth. Panels carry a coloured edge and layered shadow;
+   calendar days and patient cards lift and tilt toward you when pointed at. */
+.staff-live-portal{--deck-teal:linear-gradient(150deg,#25807f,#134b57);--deck-blue:linear-gradient(150deg,#3b78cf,#21509b);--deck-gold:linear-gradient(150deg,#f0c062,#cf8d2c);--deck-slate:linear-gradient(150deg,#46566b,#212b38)}
+.staff-live-portal .live-panel{position:relative;overflow:hidden;border:0;border-radius:18px;background:linear-gradient(180deg,#fcfbf8,#f5f3ee);box-shadow:inset 0 1px 0 rgba(255,255,255,.9),0 0 0 1px rgba(40,55,50,.10),0 22px 40px -26px rgba(20,40,40,.55)}
+.staff-live-portal .live-panel:before{content:"";position:absolute;inset:0 0 auto;height:5px;background:var(--panel-accent,var(--deck-teal))}
+.staff-live-portal .patient-directory-panel{--panel-accent:var(--deck-blue)}.staff-live-portal .report-appointments{--panel-accent:var(--deck-teal)}.staff-live-portal .report-payments{--panel-accent:var(--deck-slate)}.staff-live-portal .reports-panel{--panel-accent:var(--deck-gold)}
+.staff-sidebar nav button.active{background:var(--deck-teal);box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 10px 18px -12px rgba(0,0,0,.7)}
+/* Calendar days: small cards in 3D; the chosen day is a teal card like the patient portal's. */
+.calendar-days{perspective:900px}
+.calendar-day{border:0;background:linear-gradient(165deg,#fff,#f2f4f2);box-shadow:inset 0 1px 0 #fff,0 0 0 1px #dde2dd,0 8px 16px -12px rgba(20,40,40,.55);transform-origin:50% 100%;translate:0;rotate:x 0deg;scale:1;transition:translate .2s ease,rotate .2s ease,box-shadow .2s ease}
+.calendar-day:hover{translate:0 -3px;rotate:x 10deg;box-shadow:inset 0 1px 0 #fff,0 0 0 1px #c9d3cf,0 14px 22px -12px rgba(20,40,40,.6)}
+.calendar-day.is-past{background:linear-gradient(165deg,#f5f5f2,#ebeae5)}
+.calendar-day[aria-pressed="true"]{background:var(--deck-teal);color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 14px 24px -12px rgba(19,75,87,.75)}
+.calendar-day[aria-pressed="true"] .calendar-count{background:rgba(255,255,255,.2);color:#fff}
+.calendar-day.is-today[aria-pressed="true"] .calendar-date{background:#fff;color:#134b57}
+.calendar-count{background:linear-gradient(150deg,#e3eefa,#d3e3f5);box-shadow:inset 0 1px 0 rgba(255,255,255,.7)}
+/* Patients: each one a card, with avatars in the deck's colours. */
+.staff-live-portal .patient-directory-list{display:grid;gap:10px;perspective:1100px}
+.staff-live-portal .patient-directory-list article{padding:12px 14px;border:0;border-radius:14px;background:#fff;box-shadow:0 0 0 1px #e3e6e1,0 10px 20px -16px rgba(20,40,40,.6);transform-origin:50% 100%;translate:0;rotate:x 0deg;transition:translate .2s ease,rotate .2s ease,box-shadow .2s ease}
+.staff-live-portal .patient-directory-list article:hover{translate:0 -2px;rotate:x 4deg;box-shadow:0 0 0 1px #d3dad6,0 16px 26px -16px rgba(20,40,40,.6)}
+.staff-live-portal .patient-directory-avatar{color:#fff;background:var(--deck-blue);box-shadow:inset 0 1px 0 rgba(255,255,255,.3)}
+.staff-live-portal .patient-directory-list article:nth-child(4n+2) .patient-directory-avatar{background:var(--deck-teal)}.staff-live-portal .patient-directory-list article:nth-child(4n+3) .patient-directory-avatar{background:var(--deck-gold);color:#2a1c05}.staff-live-portal .patient-directory-list article:nth-child(4n) .patient-directory-avatar{background:var(--deck-slate)}
+.staff-live-portal .patient-profile-avatar{background:var(--deck-teal);color:#fff}
+@media (prefers-reduced-motion:reduce){.calendar-day,.staff-live-portal .patient-directory-list article{transition:none}.calendar-day:hover,.staff-live-portal .patient-directory-list article:hover{rotate:x 0deg}}
+/* The header search covers this clinic as you type, or every clinic on Enter. */
+.staff-topbar .staff-top-search{max-width:470px}.staff-top-search input{min-width:0;flex:1}
+.search-scope{display:inline-flex;flex:none;gap:2px;padding:2px;border-radius:999px;background:#e7e6df}.search-scope button{padding:5px 10px;border:0;border-radius:999px;background:none;color:#4a5751;font:inherit;font-size:12px;font-weight:650;white-space:nowrap;cursor:pointer}.search-scope button[aria-pressed="true"]{background:#fff;color:#1d2b2a;box-shadow:0 1px 3px rgba(0,0,0,.16)}
+.other-clinics{margin-top:18px;padding-top:16px;border-top:1px dashed #cdd1ca}.other-clinics h2{margin:0 0 10px;color:#33413d;font-size:15px}
+.other-clinics .patient-directory-list article{background:linear-gradient(165deg,#fffdf7,#fbf6ea)}
+/* Reports: one switch for appointments, payments and the clinic summary. */
+.report-tabs{margin:0 0 14px}.staff-live-portal .report-tabs button.active{background:#fff;color:#134b57}
+/* Profile sections: one line under the heading; the add form is a tinted box instead of two more rules. */
+.staff-live-portal .patient-profile-section .patient-profile-form{margin:16px 0 4px;padding:14px;border:0;border-radius:12px;background:#eef3f1}.staff-live-portal .patient-profile-section .patient-profile-list{border-top:0}
+/* Requested times stay visible while staff review a patient or schedule a visit. */
+.booking-preference{margin:8px 0 4px;color:#233e39;font-weight:600}
+.booking-reply-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.booking-reply-actions a{display:inline-flex;align-items:center;padding:7px 11px;border:1px solid #b9c8c2;border-radius:8px;background:#fff;color:#164e59;font-size:13px;font-weight:700;text-decoration:none}
+.booking-reply-actions a:hover{background:#e8f4f0}
+.patient-booking-requests{margin:16px 0;padding:16px 18px;border:1px solid #91aaa2;border-left:5px solid #25807f;border-radius:12px;background:#f4faf8;box-shadow:0 7px 20px -17px #153f3b}
+.patient-booking-requests h3{margin:0 0 10px}.patient-booking-requests article+article{margin-top:12px;padding-top:12px;border-top:1px solid #b8ccc5}
+.patient-booking-requests p{margin:6px 0}.patient-booking-requests small{display:block;color:#4b615b}
