@@ -5,7 +5,9 @@ export async function listBookingInquiries(){
   requireCapability('schedule.read');
   // A possible match may be a patient at another clinic in the organization, which row-level security
   // hides from this clinic, so its name comes from a definer function limited to this clinic's requests.
-  const result=await query(`SELECT b.id,b.patient_id,b.appointment_type,b.preferred_date,b.preferred_time,b.preferred_contact,b.message,b.status,b.activation_status,b.created_at,b.source,
+  // Send the requested calendar day as YYYY-MM-DD. Serializing a PostgreSQL date as a
+  // JavaScript Date can shift it by one day in the staff member's timezone.
+  const result=await query(`SELECT b.id,b.patient_id,b.appointment_type,b.preferred_date::text AS preferred_date,b.preferred_time,b.preferred_contact,b.sms_consent,b.message,b.status,b.activation_status,b.created_at,b.source,
     p.first_name,p.last_name,p.phone,p.email,m.match_name,m.match_clinic,m.matched_on
     FROM clinical.booking_inquiries b JOIN clinical.patients p ON p.organization_id=b.organization_id AND p.id=b.patient_id
     LEFT JOIN clinical.booking_possible_matches() m ON m.inquiry_id=b.id
