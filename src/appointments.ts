@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { AccessError, audit, query, requireCapability } from './context.js';
 
 const appointmentInput=z.object({patientId:z.string().uuid(),providerUserId:z.string().uuid().nullable().optional(),service:z.string().trim().min(1).max(160),startTime:z.iso.datetime({offset:true}),durationMinutes:z.number().int().min(5).max(480)}).strict();
+const appointmentChange=z.object({service:z.string().trim().min(1).max(160),startTime:z.iso.datetime({offset:true}),durationMinutes:z.number().int().min(5).max(480)}).strict();
 
 const rangeInput=z.object({from:z.iso.datetime({offset:true}),to:z.iso.datetime({offset:true})}).strict()
   .refine(range=>Date.parse(range.from)<Date.parse(range.to)&&Date.parse(range.to)-Date.parse(range.from)<=62*86_400_000,'A range runs forwards and covers at most two months');
@@ -28,4 +29,27 @@ export async function createAppointment(input:unknown){
   const id=result.rows[0]!.id;
   await audit('appointments.create','appointment',id);
   return {id};
+}
+
+export async function updateAppointment(appointmentId:string,input:unknown){
+  const c=requireCapability('schedule.manage');
+  const id=z.string().uuid().parse(appointmentId),change=appointmentChange.parse(input);
+  const current=await query<{status:string}>('SELECT status FROM clinical.appointments WHERE id=$1 AND location_id=$2 FOR UPDATE',[id,c.locationId]);
+  if(!current.rowCount) throw new AccessError(404,'Appointment not found');
+  if(current.rows[0]!.status!=='confirmed') throw new AccessError(409,'Only confirmed appointments can be edited');
+  const result=await query('UPDATE clinical.appointments SET service=$1,start_time=$2,duration_minutes=$3 WHERE id=$4 AND location_id=$5 RETURNING id,patient_id,provider_user_id,service,start_time,duration_minutes,status',[change.service,change.startTime,change.durationMinutes,id,c.locationId]);
+  await audit('appointments.update','appointment',id);
+  return result.rows[0]!;
+}
+
+export async function cancelAppointment(appointmentId:string){
+  const c=requireCapability('schedule.manage');
+  const id=z.string().uuid().parse(appointmentId);
+  const current=await query<{status:string}>('SELECT status FROM clinical.appointments WHERE id=$1 AND location_id=$2 FOR UPDATE',[id,c.locationId]);
+  if(!current.rowCount) throw new AccessError(404,'Appointment not found');
+  if(current.rows[0]!.status==='cancelled') throw new AccessError(409,'Appointment is already cancelled');
+  if(current.rows[0]!.status!=='confirmed') throw new AccessError(409,'Only confirmed appointments can be cancelled');
+  const result=await query('UPDATE clinical.appointments SET status=$1 WHERE id=$2 AND location_id=$3 RETURNING id,patient_id,provider_user_id,service,start_time,duration_minutes,status',['cancelled',id,c.locationId]);
+  await audit('appointments.cancel','appointment',id);
+  return result.rows[0]!;
 }

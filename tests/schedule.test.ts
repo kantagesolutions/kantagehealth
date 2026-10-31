@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import test, { after, before } from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { Client, Pool } from 'pg';
-import { listAppointments } from '../src/appointments.js';
+import { cancelAppointment, listAppointments, updateAppointment } from '../src/appointments.js';
 import { listWaitingBookingIds } from '../src/bookings.js';
 import { scoped } from '../src/context.js';
 
@@ -53,6 +53,24 @@ test('a range must run forwards, cover at most two months, and give both ends',a
   await assert.rejects(scoped(appPool,scope,()=>listAppointments({from:fortnight.to,to:fortnight.from})));
   await assert.rejects(scoped(appPool,scope,()=>listAppointments({from:'2026-01-01T00:00:00Z',to:'2026-06-01T00:00:00Z'})));
   await assert.rejects(scoped(appPool,scope,()=>listAppointments({from:fortnight.from,to:null})));
+});
+
+test('staff edit a confirmed appointment at their clinic and the change is audited',async()=>{
+  const changed=await scoped(appPool,scope,()=>updateAppointment(ids.inRange,{service:'Extended cleaning',startTime:'2026-11-03T16:30:00.000Z',durationMinutes:45})) as {service:string;start_time:Date|string;duration_minutes:number};
+  assert.equal(changed.service,'Extended cleaning');
+  assert.equal(new Date(changed.start_time).toISOString(),'2026-11-03T16:30:00.000Z');
+  assert.equal(changed.duration_minutes,45);
+  assert.ok((await audited()).includes('appointments.update'));
+});
+
+test('staff cancel rather than delete an appointment, and cannot change it afterwards',async()=>{
+  const cancelled=await scoped(appPool,scope,()=>cancelAppointment(ids.edge)) as {status:string};
+  assert.equal(cancelled.status,'cancelled');
+  const kept=await root(async client=>(await client.query<{status:string}>('SELECT status FROM clinical.appointments WHERE id=$1',[ids.edge])).rows[0]);
+  assert.equal(kept?.status,'cancelled','the appointment record remains');
+  assert.ok((await audited()).includes('appointments.cancel'));
+  await assert.rejects(scoped(appPool,scope,()=>updateAppointment(ids.edge,{service:'Changed',startTime:'2026-11-03T16:30:00.000Z',durationMinutes:30})),/Only confirmed/);
+  await assert.rejects(scoped(appPool,scope,()=>cancelAppointment(ids.elsewhere)),/not found/i,'another clinic cannot cancel it');
 });
 
 test('checking for new booking requests returns waiting ids only, nothing about the patient, and is not audited',async()=>{

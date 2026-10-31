@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { z, ZodError } from 'zod';
 import { AccessError, scoped } from './context.js';
-import { createAppointment, listAppointments } from './appointments.js';
+import { cancelAppointment, createAppointment, listAppointments, updateAppointment } from './appointments.js';
 import { createCareRecord, createPatient, linkPatientToLocation, listCareRecords, listPatients, patientHistory, patientPortalInvitation, patientPortalReset, readPatient, searchRoamingPatients, updatePatient } from './patients.js';
 import { createPaymentRecord, listPayments } from './payments.js';
 import { approveMySupportAccess, listSupportAccess, requestSupportAccess } from './support.js';
@@ -337,6 +337,13 @@ export function createHealthcareServer(platform:Platform):Server {
       if(request.method==='POST' && path==='/v1/appointments') {
         const payload=await body(request);
         return send(response,201,{appointment:await scoped(pool,requestScopeData,()=>createAppointment(payload))});
+      }
+      const appointmentCancelMatch=path.match(/^\/v1\/appointments\/([0-9a-f-]{36})\/cancel$/i);
+      if(appointmentCancelMatch?.[1] && request.method==='POST') return send(response,200,{appointment:await scoped(pool,requestScopeData,()=>cancelAppointment(appointmentCancelMatch[1]!))});
+      const appointmentMatch=path.match(/^\/v1\/appointments\/([0-9a-f-]{36})$/i);
+      if(appointmentMatch?.[1] && request.method==='PATCH') {
+        const payload=await body(request);
+        return send(response,200,{appointment:await scoped(pool,requestScopeData,()=>updateAppointment(appointmentMatch[1]!,payload))});
       }
       if(request.method==='GET' && path==='/v1/payments') return send(response,200,{payments:await scoped(pool,requestScopeData,listPayments)});
       if(request.method==='POST' && path==='/v1/payments') {

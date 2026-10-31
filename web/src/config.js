@@ -55,6 +55,8 @@ const actionLabels = {
   'appointments.read': 'Viewed appointments',
   'appointments.create': 'Booked an appointment',
   'appointments.schedule': 'Scheduled a booking request',
+  'appointments.update': 'Edited an appointment',
+  'appointments.cancel': 'Cancelled an appointment',
   'bookings.read': 'Viewed booking requests',
   'bookings.received': 'Booking request received',
   'documents.read': 'Viewed documents',

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { BellRing, CalendarDays, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { BellRing, CalendarDays, ChevronLeft, ChevronRight, Pencil, X } from 'lucide-react';
 import { statusLabel } from './format.js';
 import { availabilityEmail, availabilityText, requestedWindow } from './booking-preference.js';
 
@@ -13,6 +13,17 @@ const timeLabel = (value, timeZone) => new Date(value).toLocaleTimeString('en-US
 // A requested date is a plain calendar day, written like every other date in the portal.
 const preferredDay = value => value ? dayLabel(String(value).slice(0, 10), {weekday: 'short', month: 'short', day: 'numeric'}) : '';
 const patientName = (patient, fallback = 'Patient') => patient ? `${patient.first_name} ${patient.last_name}` : fallback;
+const localDateTime = (value, timeZone) => {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {timeZone, year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(value)).filter(part=>part.type!=='literal').map(part=>[part.type,part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+};
+// Convert a wall-clock value in the clinic's timezone into the explicit UTC instant the API stores.
+const clinicDateTimeIso = (value, timeZone) => {
+  const desired=Date.parse(`${value}:00Z`),guess=new Date(desired);
+  const parts=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(guess).filter(part=>part.type!=='literal').map(part=>[part.type,part.value]));
+  const shown=Date.UTC(Number(parts.year),Number(parts.month)-1,Number(parts.day),Number(parts.hour),Number(parts.minute),Number(parts.second));
+  return new Date(desired+(desired-shown)).toISOString();
+};
 // Weeks start on Sunday, as on a US wall calendar.
 const sundayOf = key => addDays(key, -asDate(key).getUTCDay());
 
@@ -24,6 +35,10 @@ export function TwoWeekSchedule({ request, timeZone, patientsById, onOpenPatient
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [notice,setNotice]=useState('');
+  const [editing,setEditing]=useState(null);
+  const [cancelling,setCancelling]=useState(null);
+  const [busy,setBusy]=useState(false);
   const days = useMemo(() => Array.from({length: 14}, (_, index) => addDays(start, index)), [start]);
   useEffect(() => {
     let current = true;
@@ -51,6 +66,9 @@ export function TwoWeekSchedule({ request, timeZone, patientsById, onOpenPatient
   const goToday = () => { setStart(sundayOf(today)); setSelected(today); };
   const dayItems = byDay.get(selected) || [];
   const counted = days.reduce((sum, key) => sum + (byDay.get(key)?.length || 0), 0);
+  const startEdit=item=>{setCancelling(null);setError('');setNotice('');setEditing({id:item.id,service:item.service||'',startTime:localDateTime(item.start_time,timeZone),durationMinutes:item.duration_minutes||30});};
+  const saveEdit=async event=>{event.preventDefault();setBusy(true);setError('');setNotice('');try{const {appointment}=await request(`/v1/appointments/${editing.id}`,{method:'PATCH',body:JSON.stringify({service:editing.service,startTime:clinicDateTimeIso(editing.startTime,timeZone),durationMinutes:Number(editing.durationMinutes)})});setAppointments(current=>current.map(item=>item.id===appointment.id?appointment:item));setEditing(null);setNotice('Appointment updated.');}catch(failure){setError(failure.message);}finally{setBusy(false);}};
+  const confirmCancel=async()=>{setBusy(true);setError('');setNotice('');try{const {appointment}=await request(`/v1/appointments/${cancelling.id}/cancel`,{method:'POST'});setAppointments(current=>current.map(item=>item.id===appointment.id?appointment:item));setCancelling(null);setNotice('Appointment cancelled. The appointment remains in the patient history.');}catch(failure){setError(failure.message);}finally{setBusy(false);}};
   return <article className="live-panel staff-schedule-panel two-week-schedule">
     <div className="panel-heading">
       <div><h2>Schedule</h2><p>{dayLabel(days[0], {month: 'short', day: 'numeric'})} to {dayLabel(days[13], {month: 'short', day: 'numeric', year: 'numeric'})} · {loading ? 'loading…' : `${counted} appointment${counted === 1 ? '' : 's'}`}</p></div>
@@ -61,6 +79,7 @@ export function TwoWeekSchedule({ request, timeZone, patientsById, onOpenPatient
       </div>
     </div>
     {error && <div className="live-error">{error}</div>}
+    {notice && <div className="live-notice">{notice}</div>}
     <div className="schedule-body"><div className="calendar-month">
     <div className="calendar-weekdays" aria-hidden="true">{days.slice(0, 7).map(key => <span key={key}>{dayLabel(key, {weekday: 'short'})}</span>)}</div>
     <div className="calendar-days" role="group" aria-label="Choose a day">
@@ -82,12 +101,16 @@ export function TwoWeekSchedule({ request, timeZone, patientsById, onOpenPatient
       <h3>{selected === today ? 'Today, ' : ''}{dayLabel(selected, {weekday: 'long', month: 'long', day: 'numeric'})}</h3>
       {dayItems.length ? <div className="schedule-list">{dayItems.map(item => {
         const patient = patientsById.get(item.patient_id);
-        return <div className="schedule-row" key={item.id}>
+        const changeable=item.status==='confirmed';
+        return <Fragment key={item.id}><div className="schedule-row">
           <time dateTime={item.start_time}><strong>{timeLabel(item.start_time, timeZone)}</strong>{item.duration_minutes ? <small>{item.duration_minutes} min</small> : null}</time>
           <span className="schedule-dot" />
           <span className="schedule-detail"><strong>{item.service || 'Appointment'}</strong>{patient ? <button type="button" className="schedule-patient" onClick={() => onOpenPatient(patient)}>{patientName(patient)}</button> : <small>Patient</small>}</span>
-          <span className={`schedule-status status-${item.status}`}>{statusLabel(item.status)}</span>
-        </div>;
+          <span className="schedule-row-actions"><span className={`schedule-status status-${item.status}`}>{statusLabel(item.status)}</span>{changeable&&<><button type="button" className="secondary compact-button" onClick={()=>startEdit(item)}><Pencil size={14}/> Edit</button><button type="button" className="secondary danger compact-button" onClick={()=>{setEditing(null);setNotice('');setError('');setCancelling(item);}}><X size={14}/> Cancel</button></>}</span>
+        </div>
+        {editing?.id===item.id&&<form className="appointment-edit-panel" onSubmit={saveEdit}><h4>Edit appointment</h4><label>Service<input value={editing.service} onChange={event=>setEditing(current=>({...current,service:event.target.value}))} required maxLength="160" /></label><label>Date and time<input type="datetime-local" value={editing.startTime} onChange={event=>setEditing(current=>({...current,startTime:event.target.value}))} required /></label><label>Duration<select value={editing.durationMinutes} onChange={event=>setEditing(current=>({...current,durationMinutes:event.target.value}))}>{[15,30,45,60,90,120].map(minutes=><option key={minutes} value={minutes}>{minutes} minutes</option>)}</select></label><div className="staff-edit-actions"><button className="primary" disabled={busy}>{busy?'Saving…':'Save changes'}</button><button type="button" className="secondary" onClick={()=>setEditing(null)}>Close</button></div></form>}
+        {cancelling?.id===item.id&&<div className="appointment-cancel-panel" role="alertdialog" aria-label={`Cancel ${item.service} appointment`}><h4>Cancel this appointment?</h4><p>{patientName(patient)}’s {item.service} appointment at {timeLabel(item.start_time,timeZone)} will be marked cancelled and kept in their history.</p><div className="staff-edit-actions"><button type="button" className="primary danger" disabled={busy} onClick={confirmCancel}>{busy?'Cancelling…':'Cancel appointment'}</button><button type="button" className="secondary" onClick={()=>setCancelling(null)}>Keep appointment</button></div></div>}
+        </Fragment>;
       })}</div> : <div className="compact-empty"><CalendarDays /><span>{loading ? 'Loading the schedule…' : 'No appointments booked for this day.'}</span></div>}
     </section></div>
   </article>;
