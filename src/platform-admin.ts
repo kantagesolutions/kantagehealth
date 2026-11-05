@@ -1,4 +1,5 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+import { AccessError } from './context.js';
 import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
 import type { TenantConfig, TenantPoolRegistry, TenantRegistry } from './tenant-registry.js';
@@ -198,9 +199,64 @@ export async function createPlatformStaff(tenants:TenantConfig[],pools:TenantPoo
   return audited(await pools.get(tenant),actor,async client=>{
     const result=await client.query<{user_id:string}>('SELECT * FROM clinical.platform_create_staff($1,$2,$3,$4,$5,$6)',[request.organizationId,account.username,request.email,request.name,request.role,request.locationId??null]);
     const userId=result.rows[0]?.user_id??null;
+    // The new person chooses their own password through a one-time link, so no temporary password is sent.
+    const link=userId?(await issueLink(client,request.organizationId,userId)).link:null;
     return {
-      result:{userId,username:account.username},
+      result:{userId,username:account.username,passwordLink:link},
       activity:{action:'staff.invite',organizationId:request.organizationId,targetType:'staff',targetId:userId,targetLabel:account.username,metadata:{role:request.role}},
+    };
+  });
+}
+
+// One-time links where a staff member chooses their own password. The secret is random and only its
+// hash is stored. It is prefixed with the organization so the link can be checked without a sign in.
+const passwordLinkHours=72;
+const passwordToken=z.string().regex(/^[0-9a-f-]{36}\.[A-Za-z0-9_-]{43}$/);
+const hashToken=(token:string)=>createHash('sha256').update(token).digest('hex');
+async function issueLink(client:PoolClient,organizationId:string,userId:string){
+  const token=`${organizationId}.${randomBytes(32).toString('base64url')}`;
+  const expiresAt=new Date(Date.now()+passwordLinkHours*60*60*1000);
+  const row=(await client.query<{username:string;name:string}>('SELECT * FROM clinical.platform_issue_staff_password_link($1,$2,$3,$4)',[organizationId,userId,hashToken(token),expiresAt])).rows[0];
+  if(!row) throw new Error('Staff member not found');
+  return {username:row.username,name:row.name,link:{token,expiresAt:expiresAt.toISOString()}};
+}
+export async function issueStaffPasswordLink(tenant:TenantConfig,pools:TenantPoolRegistry,actor:PlatformActor,organizationId:string,userId:string){
+  const org=z.string().uuid().parse(organizationId),user=z.string().uuid().parse(userId);
+  return audited(await pools.get(tenant),actor,async client=>{
+    const issued=await issueLink(client,org,user);
+    return {
+      result:{username:issued.username,name:issued.name,passwordLink:issued.link},
+      activity:{action:'staff.password_link',organizationId:org,targetType:'staff',targetId:user,targetLabel:issued.name},
+    };
+  });
+}
+async function passwordLinkTarget(tenants:TenantConfig[],pools:TenantPoolRegistry,input:unknown){
+  const token=passwordToken.parse(input); const organizationId=token.slice(0,36);
+  // Every organization shares one database today; the lookup below still checks the organization.
+  const tenant=tenants.find(item=>item.organizationId===organizationId)??tenants[0];
+  const expired=new AccessError(410,'This link has expired or was already used. Ask your administrator for a new one.');
+  if(!tenant) throw expired;
+  const pool=await pools.get(tenant);
+  const target=(await pool.query<{user_id:string;username:string;name:string}>('SELECT * FROM clinical.staff_password_link_target($1,$2)',[organizationId,hashToken(token)])).rows[0];
+  if(!target) throw expired;
+  return {pool,organizationId,token,target};
+}
+// What the set-password page shows: whose account the link is for, and the username to sign in with.
+export async function readStaffPasswordLink(tenants:TenantConfig[],pools:TenantPoolRegistry,input:unknown){
+  const {target}=await passwordLinkTarget(tenants,pools,(input as {token?:unknown})?.token);
+  return {name:target.name,username:target.username};
+}
+const setPasswordRequest=z.object({token:z.string(),password:z.string().min(1).max(256)}).strict();
+export async function setStaffPassword(tenants:TenantConfig[],pools:TenantPoolRegistry,accounts:WorkforceAccountProvisioner,input:unknown){
+  const request=setPasswordRequest.parse(input);
+  const {pool,organizationId,token,target}=await passwordLinkTarget(tenants,pools,request.token);
+  // A password the identity service rejects throws here, before the link is used up, so they can try again.
+  await accounts.setPassword(target.username,request.password);
+  return audited(pool,{username:target.username},async client=>{
+    await client.query('SELECT clinical.consume_staff_password_link($1,$2)',[organizationId,hashToken(token)]);
+    return {
+      result:{username:target.username},
+      activity:{action:'staff.password_set',organizationId,targetType:'staff',targetId:target.user_id,targetLabel:target.name},
     };
   });
 }

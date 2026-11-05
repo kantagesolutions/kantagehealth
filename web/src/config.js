@@ -43,6 +43,8 @@ const actionLabels = {
   'staff.archive': 'Archived staff member',
   'staff.delete': 'Deleted staff member',
   'staff.login_remove': 'Removed staff sign in and archived account',
+  'staff.password_link': 'Created a password link',
+  'staff.password_set': 'Set their own password',
   'patients.login_remove': 'Removed patient sign in and kept chart',
   'patients.delete': 'Deleted empty patient profile',
   'patients.list': 'Viewed patient list',

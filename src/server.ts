@@ -19,7 +19,7 @@ import { completeDocument, createDocumentUpload, listDocuments, patientDocumentO
 import { CognitoPatientAccountProvisioner, savePatientInvite, type PatientAccountProvisioner } from './patient-accounts.js';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { assignableRoles, createClinic, createPlatformClient, createPlatformStaff, deleteOrganization, deletePatient, deleteStaff, listClinics, listPlatformAccess, listPlatformActivity, listPlatformClients, listPlatformPatientLogins, listPlatformPatients, organizationRecords, patientRecords, removePatientLogin, removeStaffLogin, setClinicStatus, setOrganizationStatus, setUserStatus, staffRecords, updateClinic, updateOrganization, updatePlatformStaff, type PlatformActor } from './platform-admin.js';
+import { assignableRoles, createClinic, issueStaffPasswordLink, readStaffPasswordLink, setStaffPassword, createPlatformClient, createPlatformStaff, deleteOrganization, deletePatient, deleteStaff, listClinics, listPlatformAccess, listPlatformActivity, listPlatformClients, listPlatformPatientLogins, listPlatformPatients, organizationRecords, patientRecords, removePatientLogin, removeStaffLogin, setClinicStatus, setOrganizationStatus, setUserStatus, staffRecords, updateClinic, updateOrganization, updatePlatformStaff, type PlatformActor } from './platform-admin.js';
 import { CognitoWorkforceAccountProvisioner, type WorkforceAccountProvisioner } from './workforce-accounts.js';
 import { CognitoIdentityRemover, type IdentityRemover } from './account-removal.js';
 
@@ -104,6 +104,16 @@ export function createHealthcareServer(platform:Platform):Server {
           return send(response,201,{inquiry:{id:inquiry.id,patientId:inquiry.patientId}});
         }
         return send(response,405,{error:'Method not allowed'});
+      }
+      // A new staff member opens a one-time link and chooses their own password, with no sign in yet.
+      // The token travels in the body, never the path, so it stays out of access logs.
+      if(request.method==='POST' && (path==='/v1/public/staff-password/lookup'||path==='/v1/public/staff-password')) {
+        const ip=remoteIp(request)??'unknown';
+        if(!allowBooking(ip,path)) return send(response,429,{error:'Too many attempts. Please try again in an hour.'});
+        const tenants=await platform.registry.list();
+        if(path==='/v1/public/staff-password/lookup') return send(response,200,{account:await readStaffPasswordLink(tenants,platform.pools,await body(request))});
+        if(!platform.workforceAccounts) throw new Error('Workforce onboarding is unavailable');
+        return send(response,200,{account:await setStaffPassword(tenants,platform.pools,platform.workforceAccounts,await body(request))});
       }
       if(request.method==='GET' && path==='/v1/session/workspaces') {
         const bearer=token(request);
@@ -252,6 +262,11 @@ export function createHealthcareServer(platform:Platform):Server {
         }
         // Editing has its own path so the status route keeps its meaning for the version still serving
         // while a deploy rolls out.
+        const passwordLinkMatch=path.match(/^\/v1\/admin\/access\/([0-9a-f-]{36})\/([0-9a-f-]{36})\/password-link$/i);
+        if(request.method==='POST'&&passwordLinkMatch?.[1]&&passwordLinkMatch[2]) {
+          const tenant=tenants.find(item=>item.organizationId===passwordLinkMatch[1])??tenants[0]; if(!tenant) throw new AccessError(404);
+          return send(response,201,{staff:await issueStaffPasswordLink(tenant,platform.pools,actor,passwordLinkMatch[1],passwordLinkMatch[2])});
+        }
         const profileMatch=path.match(/^\/v1\/admin\/access\/([0-9a-f-]{36})\/([0-9a-f-]{36})\/profile$/i);
         if(request.method==='PATCH'&&profileMatch?.[1]&&profileMatch[2]) {
           const tenant=tenants.find(item=>item.organizationId===profileMatch[1])??tenants[0]; if(!tenant) throw new AccessError(404);
