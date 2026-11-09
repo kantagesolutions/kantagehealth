@@ -8,13 +8,22 @@ export interface PublicBookingTarget {
   timezone:string;
 }
 
+export function isOpenPreferredDate(value:string):boolean {
+  const day=new Date(`${value}T00:00:00Z`).getUTCDay();
+  return day>=1&&day<=4;
+}
+
+const preferredDate=z.string().date().refine(isOpenPreferredDate,{
+  message:'The office is closed Friday through Sunday. Choose Monday through Thursday.',
+});
+
 const inquiryInput=z.object({
   firstName:z.string().trim().min(1).max(100),
   lastName:z.string().trim().min(1).max(100),
   phone:z.string().trim().min(7).max(40),
   email:z.string().trim().email().max(254).optional(),
   appointmentType:z.string().trim().min(1).max(160),
-  preferredDate:z.string().date().optional(),
+  preferredDate:preferredDate.optional(),
   preferredContact:z.enum(['email','text','phone']).default('email'),
   textConsent:z.boolean().default(false),
   preferredTime:z.string().trim().max(60).optional(),
@@ -55,7 +64,7 @@ export async function listBookingClinics(pool:Pool,organizationId:string,booking
 const portalBookingInput=z.object({
   clinic:z.string().regex(/^[A-Za-z0-9_-]{20,128}$/),
   appointmentType:z.string().trim().min(1).max(160),
-  preferredDate:z.string().date().optional(),
+  preferredDate:preferredDate.optional(),
   preferredContact:z.enum(['email','text','phone']).default('email'),
   preferredTime:z.string().trim().max(60).optional(),
   message:z.string().trim().max(1000).optional(),
