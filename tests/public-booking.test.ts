@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createPublicBookingInquiry } from '../src/public-booking.js';
+import { createPublicBookingInquiry, isOpenPreferredDate } from '../src/public-booking.js';
+
+test('appointment requests accept Monday through Thursday and reject closed days', () => {
+  assert.equal(isOpenPreferredDate('2030-05-06'),true);
+  assert.equal(isOpenPreferredDate('2030-05-07'),true);
+  assert.equal(isOpenPreferredDate('2030-05-08'),true);
+  assert.equal(isOpenPreferredDate('2030-05-09'),true);
+  assert.equal(isOpenPreferredDate('2030-05-10'),false);
+  assert.equal(isOpenPreferredDate('2030-05-11'),false);
+  assert.equal(isOpenPreferredDate('2030-05-12'),false);
+});
 
 test('public booking creates a patient-linked inquiry in the selected clinic scope', async () => {
   const calls: Array<{ text: string; values?: unknown[] }> = [];
@@ -27,7 +37,7 @@ test('public booking creates a patient-linked inquiry in the selected clinic sco
     phone: '443-555-0100',
     email: 'jamie@example.com',
     appointmentType: 'Emergency dentistry',
-    preferredDate: '2030-05-10',
+    preferredDate: '2030-05-09',
     preferredContact: 'text',
     textConsent: true,
     preferredTime: 'Morning',
@@ -37,7 +47,21 @@ test('public booking creates a patient-linked inquiry in the selected clinic sco
   assert.deepEqual(result, { id: 'inquiry-1', patientId: 'patient-1', patient:{firstName:'Jamie',lastName:'Example',email:'jamie@example.com',phone:'443-555-0100',textConsent:true} });
   assert.deepEqual(calls[2]?.values?.slice(0, 9), [
     'Jamie', 'Example', '443-555-0100', 'jamie@example.com', 'Emergency dentistry',
-    '2030-05-10', 'text', 'Morning', 'Please call when available.',
+    '2030-05-09', 'text', 'Morning', 'Please call when available.',
   ]);
   assert.equal(calls.at(-1)?.text, 'COMMIT');
+});
+
+test('public booking refuses a closed preferred date before writing data', async () => {
+  let connected=false;
+  const pool={connect:async()=>{connected=true;throw new Error('should not connect');}};
+  await assert.rejects(createPublicBookingInquiry(pool as never,{
+    organizationId:'00000000-0000-4000-8000-000000000001',
+    locationId:'00000000-0000-4000-8000-000000000002',
+    clinicName:'Express Dental Emergency Services',
+    timezone:'America/New_York',
+  },{
+    firstName:'Jamie',lastName:'Example',phone:'443-555-0100',appointmentType:'Cleaning',preferredDate:'2030-05-10',
+  },{userAgent:'test-agent'}),/closed Friday through Sunday/);
+  assert.equal(connected,false);
 });

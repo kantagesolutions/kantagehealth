@@ -7,6 +7,10 @@ import { formatDay, plural, statusLabel } from './format.js';
 const visitTypes = ['Checkup and cleaning', 'Tooth pain or emergency', 'Consultation', 'Follow-up visit'];
 const timeOf = value => new Date(value).toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit'});
 const dayOf = value => new Date(value).toLocaleDateString('en-US', {weekday: 'short', month: 'short', day: 'numeric'});
+const isOpenPreferredDate = value => {
+  const day = new Date(`${value}T00:00:00Z`).getUTCDay();
+  return day >= 1 && day <= 4;
+};
 
 // A signed-in patient asks for a visit at whichever clinic suits them. Choosing another clinic makes it
 // their clinic from then on; their history comes with them.
@@ -24,6 +28,16 @@ function PatientBooking({ request, onBooked }) {
   useEffect(() => { loadClinics(); }, []);
   const chosen = clinics.find(clinic => clinic.key === form.clinic);
   const change = field => event => setForm(value => ({...value, [field]: event.target.value}));
+  const changePreferredDate = event => {
+    const value = event.target.value;
+    if (value && !isOpenPreferredDate(value)) {
+      setForm(current => ({...current, preferredDate: ''}));
+      setError('The office is closed Friday through Sunday. Choose Monday through Thursday.');
+      return;
+    }
+    setError('');
+    setForm(current => ({...current, preferredDate: value}));
+  };
   const submit = async event => {
     event.preventDefault(); setSending(true); setError(''); setNotice('');
     const optional = Object.fromEntries(['preferredDate', 'preferredTime', 'message'].filter(field => form[field].trim()).map(field => [field, form[field].trim()]));
@@ -43,7 +57,7 @@ function PatientBooking({ request, onBooked }) {
       {chosen && !chosen.current && <p className="pp-note">{chosen.name} will become your clinic. Your appointments and records come with you.</p>}
       <label>Type of visit<select value={form.appointmentType} onChange={change('appointmentType')}>{visitTypes.map(type => <option key={type}>{type}</option>)}</select></label>
       <div className="pp-form-pair">
-        <label>Preferred date<input type="date" value={form.preferredDate} min={new Date().toISOString().slice(0, 10)} onChange={change('preferredDate')} /></label>
+        <label>Preferred date<input type="date" value={form.preferredDate} min={new Date().toISOString().slice(0, 10)} onChange={changePreferredDate} /><small>Appointments are requested Monday through Thursday.</small></label>
         <label>Preferred time<input value={form.preferredTime} maxLength="60" placeholder="Mornings" onChange={change('preferredTime')} /></label>
       </div>
       <label>Anything the office should know<textarea value={form.message} maxLength="1000" rows="3" onChange={change('message')} /></label>
