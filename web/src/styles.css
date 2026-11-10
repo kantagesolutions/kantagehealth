@@ -464,3 +464,13 @@
 /* Choosing a password from a one-time link, and the link an administrator hands over. */
 .set-password-form .password-rules{list-style:none;margin:-4px 0 0;padding:0;display:grid;gap:5px;font-size:13px;color:#6b7c91}.password-rules li{display:flex;align-items:center;gap:7px}.password-rules svg{color:#c3cfd8}.password-rules li[data-met="true"]{color:#176444}.password-rules li[data-met="true"] svg{color:#1a9a65}.field-hint.mismatch{color:#9f2f26;margin:-8px 0 0}.set-password-form .primary{margin-top:6px}
 .password-link-panel{border-color:#c9dcec;background:linear-gradient(135deg,#fbfdff,#eef6fc)}.password-link-panel h2{margin:0 0 6px}.password-link-panel p{margin:0;color:#5f7389;line-height:1.5}.password-link-row{display:flex;gap:10px;margin:18px 0 10px}.password-link-row input{flex:1;min-width:0;height:45px;border:1px solid #bfcfdb;border-radius:7px;background:#fff;padding:0 12px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--day-navy)}.password-link-row .primary{height:45px;white-space:nowrap}@media(max-width:560px){.password-link-row{flex-direction:column}.password-link-row .primary{width:100%}}
+.admin-booking-schedule{margin:1.1rem 0;padding:1.3rem;border:2px solid #708499;border-radius:16px;background:#f5f7f8;box-shadow:0 8px 22px #1d34431a}
+.admin-booking-schedule fieldset{margin:1rem 0;padding:1rem;border:1px solid #9cabb6;border-radius:12px}
+.admin-booking-schedule legend{padding:0 .4rem;font-weight:700;color:#173b56}
+.schedule-weekdays{display:flex;flex-wrap:wrap;gap:.5rem}
+.schedule-weekdays label{display:flex;align-items:center;gap:.45rem;padding:.55rem .7rem;border:1px solid #8a9dab;border-radius:10px;background:#fff;cursor:pointer}
+.schedule-weekdays input{width:1rem;height:1rem;accent-color:#157a8b}
+.schedule-add-date{display:flex;align-items:center;flex-wrap:wrap;gap:.65rem}
+.schedule-add-date input{min-height:42px;padding:.45rem;border:1px solid #8a9dab;border-radius:8px}
+.schedule-blocked-list{list-style:none;margin:.8rem 0 0;padding:0;display:grid;gap:.35rem}
+.schedule-blocked-list li{display:flex;align-items:center;justify-content:space-between;padding:.35rem .2rem;border-bottom:1px solid #a6b2bc}

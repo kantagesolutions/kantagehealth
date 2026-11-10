@@ -326,6 +326,24 @@ export async function listClinics(tenant:TenantConfig,pools:TenantPoolRegistry,o
   const result=await (await pools.get(tenant)).query('SELECT * FROM clinical.platform_clinics($1)',[org]);
   return result.rows;
 }
+const bookingScheduleInput=z.object({
+  openWeekdays:z.array(z.number().int().min(0).max(6)).min(1).max(7).refine(days=>new Set(days).size===days.length),
+  blockedDates:z.array(z.string().date()).max(366),
+}).strict();
+export async function getClinicBookingSchedule(tenant:TenantConfig,pools:TenantPoolRegistry,organizationId:string,locationId:string){
+  const org=z.string().uuid().parse(organizationId),loc=z.string().uuid().parse(locationId);
+  const result=await (await pools.get(tenant)).query<{open_weekdays:number[];blocked_dates:(string|Date)[]}>('SELECT * FROM clinical.booking_schedule($1,$2)',[org,loc]);
+  const row=result.rows[0]; if(!row) throw new AccessError(404,'Clinic not found');
+  return {openWeekdays:row.open_weekdays,blockedDates:row.blocked_dates.map(day=>day instanceof Date?`${day.getFullYear()}-${String(day.getMonth()+1).padStart(2,'0')}-${String(day.getDate()).padStart(2,'0')}`:String(day).slice(0,10))};
+}
+export async function setClinicBookingSchedule(tenant:TenantConfig,pools:TenantPoolRegistry,actor:PlatformActor,organizationId:string,locationId:string,input:unknown){
+  const org=z.string().uuid().parse(organizationId),loc=z.string().uuid().parse(locationId),schedule=bookingScheduleInput.parse(input);
+  return audited(await pools.get(tenant),actor,async client=>{
+    const result=await client.query<{clinic_name:string;previous_weekdays:number[];previous_blocked_dates:string[]}>('SELECT * FROM clinical.platform_set_booking_schedule($1,$2,$3::integer[],$4::date[])',[org,loc,schedule.openWeekdays,[...new Set(schedule.blockedDates)].sort()]);
+    const previous=result.rows[0]; if(!previous) throw new AccessError(404,'Clinic not found');
+    return {result:schedule,activity:{action:'clinics.schedule_update',organizationId:org,targetType:'clinic',targetId:loc,targetLabel:previous.clinic_name,metadata:{previous:{openWeekdays:previous.previous_weekdays,blockedDates:previous.previous_blocked_dates},next:schedule}}};
+  });
+}
 export async function createClinic(registry:TenantRegistry,pools:TenantPoolRegistry,actor:PlatformActor,organizationId:string,input:unknown){
   const org=z.string().uuid().parse(organizationId); const request=clinicInput.parse(input);
   const tenant=(await registry.list()).find(item=>item.organizationId===org); if(!tenant) throw new Error('Organization is not connected');

@@ -93,6 +93,7 @@ test('clinic choices are identified by booking link only, and the patient portal
   const tenant={organizationId:'00000000-0000-4000-8000-000000000001',staffUserPoolId:'us-east-1_example',staffClientId:'portal-client',bookingClinics:[{key:'NorthBookingKey_123456789',locationId:north,clinicName:'North',timezone:'America/New_York'},{key:'SouthBookingKey_123456789',locationId:south,clinicName:'South',timezone:'America/New_York'}]};
   const mockPool={query:async(sql:string)=>{
     if(sql.includes('booking_clinics')) return {rows:[north,south,unlinked].map((id,index)=>({location_id:id,name:['North','South','No booking link'][index],address:`${index+1} Example Street`,timezone:'America/New_York'}))};
+    if(sql.includes('booking_schedule')) return {rows:[{open_weekdays:[1,2,3,4],blocked_dates:[]}]};
     if(sql.includes('patient_portal_home')) return {rows:[{home:{patient:{firstName:'Jordan'},clinic:{id:south,name:'South'},appointments:[],documents:[]}}]};
     throw new Error(`Unexpected query: ${sql}`);
   }};
@@ -106,7 +107,7 @@ test('clinic choices are identified by booking link only, and the patient portal
     const address=server.address(); if(!address || typeof address==='string') throw new Error('No test server address');
     const url=(path:string)=>`http://127.0.0.1:${address.port}${path}`;
     const publicList=await (await fetch(url('/v1/public/booking/NorthBookingKey_123456789/clinics'))).json() as {clinics:unknown[]};
-    assert.deepEqual(publicList.clinics,[{key:'NorthBookingKey_123456789',name:'North',address:'1 Example Street',timezone:'America/New_York'},{key:'SouthBookingKey_123456789',name:'South',address:'2 Example Street',timezone:'America/New_York'}],'a clinic without a booking link is not offered');
+    assert.deepEqual(publicList.clinics,[{key:'NorthBookingKey_123456789',name:'North',address:'1 Example Street',timezone:'America/New_York',openWeekdays:[1,2,3,4],blockedDates:[]},{key:'SouthBookingKey_123456789',name:'South',address:'2 Example Street',timezone:'America/New_York',openWeekdays:[1,2,3,4],blockedDates:[]}],'a clinic without a booking link is not offered');
     const portalList=await (await fetch(url('/v1/patient/clinics'),{headers:{authorization:'Bearer token'}})).json() as {clinics:{name:string;current:boolean}[]};
     assert.deepEqual(portalList.clinics.map(clinic=>[clinic.name,clinic.current]),[['North',false],['South',true]]);
     const home=await (await fetch(url('/v1/patient/home'),{headers:{authorization:'Bearer token'}})).json();

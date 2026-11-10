@@ -11,7 +11,7 @@ import { approveMySupportAccess, listSupportAccess, requestSupportAccess } from 
 import type { StaffAuthConfig, TokenVerifier } from './auth.js';
 import { staffVerifier, verifyStaffToken } from './auth.js';
 import { productionRegistry, staffClientIds, TenantPoolRegistry, type TenantConfig, type TenantRegistry } from './tenant-registry.js';
-import { createPatientPortalBooking, createPublicBookingInquiry, listBookingClinics } from './public-booking.js';
+import { BookingDateClosedError, createPatientPortalBooking, createPublicBookingInquiry, listBookingClinics } from './public-booking.js';
 import { listStaffWorkspaces } from './workspaces.js';
 import { clinicReports, platformReports } from './reports.js';
 import { listBookingInquiries, listWaitingBookingIds, resolveBookingMatch, scheduleBookingInquiry } from './bookings.js';
@@ -19,7 +19,7 @@ import { completeDocument, createDocumentUpload, listDocuments, patientDocumentO
 import { CognitoPatientAccountProvisioner, savePatientInvite, type PatientAccountProvisioner } from './patient-accounts.js';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { assignableRoles, createClinic, issueStaffPasswordLink, readStaffPasswordLink, setStaffPassword, createPlatformClient, createPlatformStaff, deleteOrganization, deletePatient, deleteStaff, listClinics, listPlatformAccess, listPlatformActivity, listPlatformClients, listPlatformPatientLogins, listPlatformPatients, organizationRecords, patientRecords, removePatientLogin, removeStaffLogin, setClinicStatus, setOrganizationStatus, setUserStatus, staffRecords, updateClinic, updateOrganization, updatePlatformStaff, type PlatformActor } from './platform-admin.js';
+import { assignableRoles, createClinic, getClinicBookingSchedule, setClinicBookingSchedule, issueStaffPasswordLink, readStaffPasswordLink, setStaffPassword, createPlatformClient, createPlatformStaff, deleteOrganization, deletePatient, deleteStaff, listClinics, listPlatformAccess, listPlatformActivity, listPlatformClients, listPlatformPatientLogins, listPlatformPatients, organizationRecords, patientRecords, removePatientLogin, removeStaffLogin, setClinicStatus, setOrganizationStatus, setUserStatus, staffRecords, updateClinic, updateOrganization, updatePlatformStaff, type PlatformActor } from './platform-admin.js';
 import { CognitoWorkforceAccountProvisioner, type WorkforceAccountProvisioner } from './workforce-accounts.js';
 import { CognitoIdentityRemover, type IdentityRemover } from './account-removal.js';
 
@@ -247,6 +247,12 @@ export function createHealthcareServer(platform:Platform):Server {
           if(request.method==='GET') return send(response,200,{clinics:await listClinics(tenant,platform.pools,clinicsMatch[1])});
           if(request.method==='POST') return send(response,201,{clinic:await createClinic(platform.registry,platform.pools,actor,clinicsMatch[1],await body(request))});
         }
+        const clinicScheduleMatch=path.match(/^\/v1\/admin\/clients\/([0-9a-f-]{36})\/clinics\/([0-9a-f-]{36})\/booking-schedule$/i);
+        if(clinicScheduleMatch?.[1]&&clinicScheduleMatch[2]) {
+          const tenant=tenants.find(item=>item.organizationId===clinicScheduleMatch[1]); if(!tenant) throw new AccessError(404,'Organization is not connected');
+          if(request.method==='GET') return send(response,200,{schedule:await getClinicBookingSchedule(tenant,platform.pools,clinicScheduleMatch[1],clinicScheduleMatch[2])});
+          if(request.method==='PATCH') return send(response,200,{schedule:await setClinicBookingSchedule(tenant,platform.pools,actor,clinicScheduleMatch[1],clinicScheduleMatch[2],await body(request))});
+        }
         const clinicMatch=path.match(/^\/v1\/admin\/clients\/([0-9a-f-]{36})\/clinics\/([0-9a-f-]{36})$/i);
         if(request.method==='PATCH'&&clinicMatch?.[1]&&clinicMatch[2]) {
           const tenant=tenants.find(item=>item.organizationId===clinicMatch[1]); if(!tenant) throw new AccessError(404,'Organization is not connected');
@@ -403,6 +409,7 @@ export function createHealthcareServer(platform:Platform):Server {
       return send(response,404,{error:'Not found'});
     } catch(error) {
       if(error instanceof ZodError) return send(response,400,{error:'Invalid request'});
+      if(error instanceof BookingDateClosedError) return send(response,400,{error:error.message});
       if(error instanceof AccessError) return send(response,error.status,{error:error.message});
       if(error instanceof Error && error.message==='Unauthorized') return send(response,401,{error:'Unauthorized'});
       // Messages raised by our own SQL functions are fixed strings written for people, never data.

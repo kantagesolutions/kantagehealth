@@ -17,6 +17,7 @@ test('public booking creates a patient-linked inquiry in the selected clinic sco
   const client = {
     query: async (text: string, values?: unknown[]) => {
       calls.push({ text, values });
+      if (text.includes('booking_date_open')) return { rows: [{ open: true }] };
       if (text.startsWith('SELECT * FROM clinical.create_public_booking_inquiry')) {
         return { rows: [{ inquiry_id: 'inquiry-1', patient_id: 'patient-1' }] };
       }
@@ -45,16 +46,24 @@ test('public booking creates a patient-linked inquiry in the selected clinic sco
   }, { ip: '127.0.0.1', userAgent: 'test-agent' });
 
   assert.deepEqual(result, { id: 'inquiry-1', patientId: 'patient-1', patient:{firstName:'Jamie',lastName:'Example',email:'jamie@example.com',phone:'443-555-0100',textConsent:true} });
-  assert.deepEqual(calls[2]?.values?.slice(0, 9), [
+  assert.deepEqual(calls[2]?.values, [
+    '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002', '2030-05-09',
+  ]);
+  assert.deepEqual(calls[3]?.values?.slice(0, 9), [
     'Jamie', 'Example', '443-555-0100', 'jamie@example.com', 'Emergency dentistry',
     '2030-05-09', 'text', 'Morning', 'Please call when available.',
   ]);
   assert.equal(calls.at(-1)?.text, 'COMMIT');
 });
 
-test('public booking refuses a closed preferred date before writing data', async () => {
-  let connected=false;
-  const pool={connect:async()=>{connected=true;throw new Error('should not connect');}};
+test('public booking refuses a clinic blocked date before writing data', async () => {
+  let written=false;
+  const client={query:async(text:string)=>{
+    if(text.includes('booking_date_open')) return {rows:[{open:false}]};
+    if(text.includes('create_public_booking_inquiry')) written=true;
+    return {rows:[]};
+  },release:()=>undefined};
+  const pool={connect:async()=>client};
   await assert.rejects(createPublicBookingInquiry(pool as never,{
     organizationId:'00000000-0000-4000-8000-000000000001',
     locationId:'00000000-0000-4000-8000-000000000002',
@@ -62,6 +71,6 @@ test('public booking refuses a closed preferred date before writing data', async
     timezone:'America/New_York',
   },{
     firstName:'Jamie',lastName:'Example',phone:'443-555-0100',appointmentType:'Cleaning',preferredDate:'2030-05-10',
-  },{userAgent:'test-agent'}),/closed Friday through Sunday/);
-  assert.equal(connected,false);
+  },{userAgent:'test-agent'}),/not accepting appointment requests/);
+  assert.equal(written,false);
 });

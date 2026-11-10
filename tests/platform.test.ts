@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import test, { after, before } from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { Client, Pool } from 'pg';
-import { createClinic, createPlatformClient, deleteOrganization, deletePatient, deleteStaff, listClinics, listPlatformActivity, listPlatformPatients, organizationRecords, patientRecords, removePatientLogin, removeStaffLogin, setClinicStatus, setOrganizationStatus, setUserStatus, staffRecords, updateClinic, updateOrganization, updatePlatformStaff } from '../src/platform-admin.js';
+import { createClinic, createPlatformClient, deleteOrganization, deletePatient, deleteStaff, getClinicBookingSchedule, listClinics, listPlatformActivity, listPlatformPatients, organizationRecords, patientRecords, removePatientLogin, removeStaffLogin, setClinicBookingSchedule, setClinicStatus, setOrganizationStatus, setUserStatus, staffRecords, updateClinic, updateOrganization, updatePlatformStaff } from '../src/platform-admin.js';
 import { createPublicBookingInquiry } from '../src/public-booking.js';
 import { registrySecretIdFrom, TenantRegistry, type TenantConfig } from '../src/tenant-registry.js';
 import { CognitoWorkforceAccountProvisioner } from '../src/workforce-accounts.js';
@@ -18,6 +18,22 @@ const actor={username:'test.admin'};
 const run=randomUUID().slice(0,8);
 const orgId=randomUUID(), clinicA=randomUUID(), clinicB=randomUUID(), staffId=randomUUID();
 const tenant={organizationId:orgId,databaseSecretArn:'arn:test:db',documentsBucket:'test-bucket',staffUserPoolId:'pool',staffClientId:'client',bookingClinics:[]} as TenantConfig;
+
+test('admin booking days are clinic specific, audited, and enforced before patient data is written',async()=>{
+  const before=await getClinicBookingSchedule(tenant,pools,orgId,clinicA);
+  assert.deepEqual(before,{openWeekdays:[1,2,3,4],blockedDates:[]});
+  const date='2030-05-09';
+  await setClinicBookingSchedule(tenant,pools,actor,orgId,clinicA,{openWeekdays:[1,2,3,4,5],blockedDates:[date]});
+  assert.deepEqual(await getClinicBookingSchedule(tenant,pools,orgId,clinicA),{openWeekdays:[1,2,3,4,5],blockedDates:[date]});
+  assert.deepEqual(await getClinicBookingSchedule(tenant,pools,orgId,clinicB),before);
+  const check=await appPool.query<{open:boolean}>('SELECT clinical.booking_date_open($1,$2,$3::date) AS open',[orgId,clinicA,date]);
+  assert.equal(check.rows[0]?.open,false);
+  const friday=await appPool.query<{open:boolean}>('SELECT clinical.booking_date_open($1,$2,$3::date) AS open',[orgId,clinicA,'2030-05-10']);
+  assert.equal(friday.rows[0]?.open,true);
+  await assert.rejects(createPublicBookingInquiry(appPool,{organizationId:orgId,locationId:clinicA,clinicName:'Clinic A',timezone:'America/New_York'},{firstName:'Blocked',lastName:'Request',phone:'443-555-0100',appointmentType:'Cleaning',preferredDate:date},{userAgent:'healthcare-test'}),/not accepting appointment requests/);
+  const activity=await listPlatformActivity([tenant],pools) as {action:string;target_id?:string}[];
+  assert.ok(activity.some(row=>row.action==='clinics.schedule_update'));
+});
 
 function secretsClient(initial:{tenants:unknown[]}) {
   const sent:{name:string;input:Record<string,unknown>}[]=[];

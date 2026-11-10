@@ -125,7 +125,7 @@ test('a patient in another organization stays invisible, even by id',async()=>{
 
 test('patients choose among active clinics, identified by booking link and never by internal id',async()=>{
   const clinics=await listBookingClinics(appPool,orgId,tenant.bookingClinics.filter(clinic=>clinic.locationId!==clinicB));
-  assert.deepEqual(clinics,[{key:keys.a,name:'Clinic A',address:'1 A Street',timezone:'America/New_York'}],'clinic B has no link here and clinic C is out of service');
+  assert.deepEqual(clinics,[{key:keys.a,name:'Clinic A',address:'1 A Street',timezone:'America/New_York',openWeekdays:[1,2,3,4],blockedDates:[]}],'clinic B has no link here and clinic C is out of service');
   const all=await listBookingClinics(appPool,orgId,tenant.bookingClinics);
   assert.deepEqual(all.map(clinic=>clinic.name),['Clinic A','Clinic B']);
   assert.ok(!JSON.stringify(all).includes(clinicA),'no internal ids');

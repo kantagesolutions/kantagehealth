@@ -7,10 +7,11 @@ import { formatDay, plural, statusLabel } from './format.js';
 const visitTypes = ['Checkup and cleaning', 'Tooth pain or emergency', 'Consultation', 'Follow-up visit'];
 const timeOf = value => new Date(value).toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit'});
 const dayOf = value => new Date(value).toLocaleDateString('en-US', {weekday: 'short', month: 'short', day: 'numeric'});
-const isOpenPreferredDate = value => {
+const isOpenPreferredDate = (value, clinic) => {
   const day = new Date(`${value}T00:00:00Z`).getUTCDay();
-  return day >= 1 && day <= 4;
+  return (clinic?.openWeekdays || [1, 2, 3, 4]).includes(day) && !(clinic?.blockedDates || []).includes(value);
 };
+const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 // A signed-in patient asks for a visit at whichever clinic suits them. Choosing another clinic makes it
 // their clinic from then on; their history comes with them.
@@ -30,9 +31,9 @@ function PatientBooking({ request, onBooked }) {
   const change = field => event => setForm(value => ({...value, [field]: event.target.value}));
   const changePreferredDate = event => {
     const value = event.target.value;
-    if (value && !isOpenPreferredDate(value)) {
+    if (value && !isOpenPreferredDate(value, chosen)) {
       setForm(current => ({...current, preferredDate: ''}));
-      setError('The office is closed Friday through Sunday. Choose Monday through Thursday.');
+      setError(`${chosen?.name || 'The clinic'} is not accepting requests on that date. Choose an open day.`);
       return;
     }
     setError('');
@@ -53,11 +54,11 @@ function PatientBooking({ request, onBooked }) {
     {error && <div className="live-error">{error}</div>}
     {notice && <div className="live-notice">{notice}</div>}
     {clinics.length > 0 && <form className="pp-form" onSubmit={submit}>
-      <label>Clinic<select value={form.clinic} onChange={change('clinic')} required>{clinics.map(clinic => <option key={clinic.key} value={clinic.key}>{clinic.name}{clinic.current ? ' (your clinic)' : ''}</option>)}</select>{chosen?.address && <small>{chosen.address}</small>}</label>
+      <label>Clinic<select value={form.clinic} onChange={event => setForm(value => ({...value, clinic: event.target.value, preferredDate: ''}))} required>{clinics.map(clinic => <option key={clinic.key} value={clinic.key}>{clinic.name}{clinic.current ? ' (your clinic)' : ''}</option>)}</select>{chosen?.address && <small>{chosen.address}</small>}</label>
       {chosen && !chosen.current && <p className="pp-note">{chosen.name} will become your clinic. Your appointments and records come with you.</p>}
       <label>Type of visit<select value={form.appointmentType} onChange={change('appointmentType')}>{visitTypes.map(type => <option key={type}>{type}</option>)}</select></label>
       <div className="pp-form-pair">
-        <label>Preferred date<input type="date" value={form.preferredDate} min={new Date().toISOString().slice(0, 10)} onChange={changePreferredDate} /><small>Appointments are requested Monday through Thursday.</small></label>
+        <label>Preferred date<input type="date" value={form.preferredDate} min={new Date().toISOString().slice(0, 10)} onChange={changePreferredDate} /><small>Open for requests: {(chosen?.openWeekdays || [1, 2, 3, 4]).map(day => dayNames[day]).join(', ')}. Blocked dates are unavailable.</small></label>
         <label>Preferred time<input value={form.preferredTime} maxLength="60" placeholder="Mornings" onChange={change('preferredTime')} /></label>
       </div>
       <label>Anything the office should know<textarea value={form.message} maxLength="1000" rows="3" onChange={change('message')} /></label>

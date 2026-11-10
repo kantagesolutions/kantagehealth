@@ -8,14 +8,27 @@ export interface PublicBookingTarget {
   timezone:string;
 }
 
-export function isOpenPreferredDate(value:string):boolean {
+export function isOpenPreferredDate(value:string,openWeekdays:number[]=[1,2,3,4],blockedDates:string[]=[]):boolean {
   const day=new Date(`${value}T00:00:00Z`).getUTCDay();
-  return day>=1&&day<=4;
+  return openWeekdays.includes(day)&&!blockedDates.includes(value);
 }
 
-const preferredDate=z.string().date().refine(isOpenPreferredDate,{
-  message:'The office is closed Friday through Sunday. Choose Monday through Thursday.',
-});
+const preferredDate=z.string().date();
+export class BookingDateClosedError extends Error {
+  constructor(){super('That clinic is not accepting appointment requests on this date. Choose an open day.');}
+}
+export interface BookingSchedule {openWeekdays:number[];blockedDates:string[];}
+const dateOnly=(value:string|Date)=>value instanceof Date?`${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,'0')}-${String(value.getDate()).padStart(2,'0')}`:String(value).slice(0,10);
+export async function bookingSchedule(pool:Pool,organizationId:string,locationId:string):Promise<BookingSchedule>{
+  const result=await pool.query<{open_weekdays:number[];blocked_dates:(string|Date)[]}>('SELECT * FROM clinical.booking_schedule($1,$2)',[organizationId,locationId]);
+  const row=result.rows[0];
+  if(!row) throw new Error('Clinic not found');
+  return {openWeekdays:row.open_weekdays,blockedDates:row.blocked_dates.map(dateOnly)};
+}
+async function assertBookingDateOpen(query:{query:(sql:string,params:unknown[])=>Promise<{rows:{open:boolean}[]}>},org:string,loc:string,date:string){
+  const result=await query.query('SELECT clinical.booking_date_open($1,$2,$3::date) AS open',[org,loc,date]);
+  if(!result.rows[0]?.open) throw new BookingDateClosedError();
+}
 
 const inquiryInput=z.object({
   firstName:z.string().trim().min(1).max(100),
@@ -39,6 +52,7 @@ export async function createPublicBookingInquiry(pool:Pool,target:PublicBookingT
   try {
     await client.query('BEGIN');
     await client.query("SELECT set_config('app.current_org',$1,true),set_config('app.current_location',$2,true)",[target.organizationId,target.locationId]);
+    if(inquiry.preferredDate) await assertBookingDateOpen(client,target.organizationId,target.locationId,inquiry.preferredDate);
     const result=await client.query<{inquiry_id:string;patient_id:string}>('SELECT * FROM clinical.create_public_booking_inquiry($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',[
       inquiry.firstName,inquiry.lastName,inquiry.phone,inquiry.email??null,inquiry.appointmentType,inquiry.preferredDate??null,
       inquiry.preferredContact,inquiry.preferredTime??'',inquiry.message??'',inquiry.textConsent,request.ip??null,request.userAgent.slice(0,256),
@@ -51,14 +65,14 @@ export async function createPublicBookingInquiry(pool:Pool,target:PublicBookingT
   } finally { client.release(); }
 }
 
-export interface ClinicChoice { key:string; name:string; address:string; timezone:string; }
+export interface ClinicChoice extends BookingSchedule { key:string; name:string; address:string; timezone:string; }
 
 // The clinics a patient can choose from: the organization's active clinics that have a booking link.
 // Each is identified by its booking link, never by an internal id.
 export async function listBookingClinics(pool:Pool,organizationId:string,bookingClinics:{key:string;locationId:string}[]):Promise<ClinicChoice[]>{
   const keys=new Map(bookingClinics.map(clinic=>[clinic.locationId,clinic.key]));
   const result=await pool.query<{location_id:string;name:string;address:string;timezone:string}>('SELECT * FROM clinical.booking_clinics($1)',[organizationId]);
-  return result.rows.flatMap(row=>{ const key=keys.get(row.location_id); return key?[{key,name:row.name,address:row.address,timezone:row.timezone}]:[]; });
+  return Promise.all(result.rows.flatMap(row=>{ const key=keys.get(row.location_id); return key?[bookingSchedule(pool,organizationId,row.location_id).then(schedule=>({key,name:row.name,address:row.address,timezone:row.timezone,...schedule}))]:[]; }));
 }
 
 const portalBookingInput=z.object({
@@ -76,6 +90,7 @@ export async function createPatientPortalBooking(pool:Pool,tenant:{organizationI
   const booking=portalBookingInput.parse(input);
   const clinic=tenant.bookingClinics.find(item=>item.key===booking.clinic);
   if(!clinic) return undefined;
+  if(booking.preferredDate) await assertBookingDateOpen(pool,tenant.organizationId,clinic.locationId,booking.preferredDate);
   const result=await pool.query<{inquiry_id:string;clinic_name:string}>('SELECT * FROM clinical.create_patient_portal_booking($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',[
     tenant.organizationId,sub,clinic.locationId,booking.appointmentType,booking.preferredDate??null,booking.preferredContact,booking.preferredTime??'',booking.message??'',request.ip??null,request.userAgent.slice(0,256),
   ]);
