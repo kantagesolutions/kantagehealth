@@ -56,7 +56,15 @@ async function body(request:IncomingMessage):Promise<unknown>{
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
   catch { throw new AccessError(400,'Invalid JSON'); }
 }
-function remoteIp(request:IncomingMessage){ return request.socket.remoteAddress?.slice(0,64); }
+// Tasks accept traffic only from the load balancer (see the service security group), so the socket address
+// is always the balancer's. The balancer appends the real client address as the last X-Forwarded-For entry;
+// earlier entries come from the client and are ignored. Without this every visitor shared one rate limit.
+function remoteIp(request:IncomingMessage){
+  const forwarded=request.headers['x-forwarded-for'];
+  const header=Array.isArray(forwarded)?forwarded[forwarded.length-1]:forwarded;
+  const last=header?.split(',').map(part=>part.trim()).filter(Boolean).pop();
+  return (last||request.socket.remoteAddress)?.slice(0,64);
+}
 const bookingAttempts=new Map<string,{count:number;expiresAt:number}>();
 // The organization a signed-in patient belongs to, and their portal home. Every organization shares the
 // patient sign-in, so the token is tried against each until one holds a portal account for it.
@@ -77,7 +85,7 @@ async function patientAccount(platform:Platform,bearer:string){
 }
 // The portal shows the patient's clinic by name; its internal id stays on the server.
 function withoutClinicId(home:PatientHome){ const {id:_id,...clinic}=home.clinic??{}; return {...home,clinic}; }
-function allowBooking(ip:string,key:string){ const now=Date.now(), id=`${ip}:${key}`, current=bookingAttempts.get(id); if(!current || current.expiresAt<=now) { bookingAttempts.set(id,{count:1,expiresAt:now+60*60*1000}); return true; } if(current.count>=8) return false; current.count+=1; return true; }
+function allowBooking(ip:string,key:string){ const now=Date.now(), id=`${ip}:${key}`, current=bookingAttempts.get(id); if(bookingAttempts.size>10_000) for(const [entry,value] of bookingAttempts) if(value.expiresAt<=now) bookingAttempts.delete(entry); if(!current || current.expiresAt<=now) { bookingAttempts.set(id,{count:1,expiresAt:now+60*60*1000}); return true; } if(current.count>=8) return false; current.count+=1; return true; }
 
 export function createHealthcareServer(platform:Platform):Server {
   return createServer(async(request,response)=>{
@@ -379,7 +387,7 @@ export function createHealthcareServer(platform:Platform):Server {
         const payload=await body(request);
         const document=await scoped(pool,requestScopeData,()=>createDocumentUpload(payload));
         if(!platform.s3) throw new Error('Document storage unavailable');
-        const uploadUrl=await getSignedUrl(platform.s3,new PutObjectCommand({Bucket:tenant.documentsBucket,Key:document.objectKey,ContentType:document.contentType}),{expiresIn:600});
+        const uploadUrl=await getSignedUrl(platform.s3,new PutObjectCommand({Bucket:tenant.documentsBucket,Key:document.objectKey,ContentType:document.contentType,ContentLength:document.sizeBytes}),{expiresIn:600});
         return send(response,201,{document:{id:document.id,uploadUrl}});
       }
       const completeMatch=path.match(/^\/v1\/documents\/([0-9a-f-]{36})\/complete$/i);
