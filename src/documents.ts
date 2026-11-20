@@ -25,7 +25,7 @@ export async function createDocumentUpload(input:unknown){
   await query(`INSERT INTO clinical.documents(id,organization_id,location_id,patient_id,object_key,name,status,content_type,size_bytes,document_kind)
     VALUES($1,$2,$3,$4,$5,$6,'pending',$7,$8,$9)`,[id,c.organizationId,c.locationId,value.patientId,objectKey,value.name,value.contentType,value.sizeBytes,value.documentKind]);
   await audit('documents.upload','document',id);
-  return {id,objectKey,contentType:value.contentType};
+  return {id,objectKey,contentType:value.contentType,sizeBytes:value.sizeBytes};
 }
 
 export async function completeDocument(id:string){
